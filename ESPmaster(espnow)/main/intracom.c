@@ -28,15 +28,7 @@ void intracom_init(void) {
             slaves[j++] = ESP[i].mac;
         }
     }
-
-    // Configura Wi-Fi
-    esp_netif_init();
-    esp_event_loop_create_default();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_wifi_init(&cfg);
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    esp_wifi_start();
-
+    
     // Inicia ESP-NOW
     esp_now_init();
     esp_now_register_recv_cb(receive_msg);

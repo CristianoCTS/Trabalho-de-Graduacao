@@ -6,18 +6,26 @@
 #include "nvs_flash.h"
 #include "MAC.h"
 #include "intracom.h"
+#include "intercom.h"
 #include <stdio.h>
 #include "driver/gpio.h"
 #include "led_strip.h"
+#include "esp_event.h"
+#include "esp_netif.h"
+#include "esp_log.h"
 
 #define LED GPIO_NUM_8 //LED
 #define LED_all GPIO_NUM_10 //GPIO para mandar para all
 #define LED_one GPIO_NUM_11 //GPIO para mandar para apenas um
 #define LED_two GPIO_NUM_12 //GPIO para mandar para apenas um
+#define MQTT_chanel "nu uh"
 
 static bool led_status = false; //Led apagado ou acesso
 static led_strip_handle_t led_strip; // Handle para o controle do LED
 char received_msg[20] = "";
+char buf[12];
+char instrucao[20] = "";
+int brokeri = 0;
 
 void configure_led(void) {
     led_strip_config_t strip_config = {
@@ -46,6 +54,7 @@ void app_main(void) {
     nvs_flash_init();
     configure_led();
     mac_init();
+    intercom_init(); //O wifi é configurado no intercom, deve sempre ir primeiro
     intracom_init();
 
     //Configuração dos botões
@@ -58,21 +67,28 @@ void app_main(void) {
     gpio_reset_pin(LED_two);
     gpio_set_direction(LED_two, GPIO_MODE_INPUT);
     gpio_set_pull_mode(LED_two, GPIO_PULLUP_ONLY);
-
+    
     while (1) {
-        if (gpio_get_level(LED_all) == 0) {  // LOW = botão pressionado
+        snprintf(buf, sizeof(buf), "%d", brokeri);
+        intercom_publish(MQTT_chanel, buf);
+        brokeri++;
+        if (brokeri > 50) {
+            brokeri = 0;
+        }
+        intercom_read(instrucao);
+        if (gpio_get_level(LED_all) == 0 || strcmp(instrucao, "all") == 0) {
             intracom_send("Toggle", -1);
             vTaskDelay(pdMS_TO_TICKS(300));
         }
-        if (gpio_get_level(LED_one) == 0) {  // LOW = botão pressionado
+        if (gpio_get_level(LED_one) == 0 || strcmp(instrucao, "one") == 0) {
             intracom_send("Toggle", 0);
             vTaskDelay(pdMS_TO_TICKS(300));
         }
-        if (gpio_get_level(LED_two) == 0) {  // LOW = botão pressionado
+        if (gpio_get_level(LED_two) == 0 || strcmp(instrucao, "two") == 0) {
             intracom_send("Toggle", 1);
             vTaskDelay(pdMS_TO_TICKS(300));
         }
-        vTaskDelay(pdMS_TO_TICKS(10));
+        vTaskDelay(pdMS_TO_TICKS(1000));
         intracom_read(received_msg);
         //printf("Received: %s\n", received_msg);
         if (strcmp(received_msg, "Toggle") == 0) {
