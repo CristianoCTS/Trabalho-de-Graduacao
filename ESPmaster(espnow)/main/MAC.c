@@ -13,6 +13,10 @@ void mac_init(void) {
     uint8_t this_mac[6];
     esp_read_mac(this_mac, ESP_MAC_WIFI_STA);
 
+    if (NUM_ESPS > 10) {
+        printf("Número de ESPs excede o limite de 10\n");
+    }
+
     for (int i = 0; i < NUM_ESPS; i++) {
         if (memcmp(this_mac, ESP[i].mac, 6) == 0) {
             ESP[i].Iam = true;
