@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "intercom.c" "MQTT.c" "main.c"
+    SRCS "intercom.c" "main.c"
     INCLUDE_DIRS "."
     REQUIRES
         nvs_flash
