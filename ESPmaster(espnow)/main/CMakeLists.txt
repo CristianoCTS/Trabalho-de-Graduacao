@@ -1,3 +1,11 @@
-idf_component_register(SRCS "MAC.c" "intracom.c" "intercom.c" "main.c"
-                        INCLUDE_DIRS "."
-                        REQUIRES nvs_flash esp_wifi driver esp_driver_gpio esp_netif esp_event led_strip)
+idf_component_register(
+    SRCS "intercom.c" "MQTT.c" "main.c"
+    INCLUDE_DIRS "."
+    REQUIRES
+        nvs_flash
+        esp_wifi
+        esp_event
+        esp_netif
+        esp_http_client
+        esp_timer
+)

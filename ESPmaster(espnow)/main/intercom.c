@@ -9,7 +9,7 @@
 #include "esp_log.h"
 #include "mqtt_client.h"
 
-#define MQTT_BROKER "mqtt://broker.emqx.io"
+#define MQTT_BROKER "mqtt3.thingspeak.com"
 #define MQTT_port 1883
 #define MQTT_TOPIC "nu uh"
 #define MQTT_USER   "seu_usuario"
