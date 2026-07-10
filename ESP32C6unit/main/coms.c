@@ -5,7 +5,6 @@
 #include "esp_wifi.h"
 #include "esp_now.h"
 #include "MAC.h"
-#include "esp_log.h"
 #include "mqtt_client.h"
 #include "MQTT.h"
 #include "nvs_flash.h"

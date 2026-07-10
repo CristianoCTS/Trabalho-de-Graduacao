@@ -1,17 +1,11 @@
 #include <string.h>
+#include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_wifi.h"
-#include "esp_now.h"
-#include "nvs_flash.h"
-#include "MAC.h"
-#include "coms.h"
-#include <stdio.h>
 #include "driver/gpio.h"
 #include "led_strip.h"
 #include "esp_event.h"
-#include "esp_netif.h"
-#include "esp_log.h"
+#include "coms.h"
 
 #define LED GPIO_NUM_8 //LED
 #define LED_all GPIO_NUM_10 //GPIO para mandar para all
@@ -51,7 +45,6 @@ void app_main(void) {
     //setup das conexões
     coms_init();
     configure_led();
-
 
     //Configuração dos botões
     gpio_reset_pin(LED_all);

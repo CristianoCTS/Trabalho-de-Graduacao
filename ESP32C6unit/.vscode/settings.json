@@ -14,5 +14,6 @@
     "--background-index",
     "--query-driver=**",
     "--compile-commands-dir=c:\\TG\\ESP32C6unit\\build"
-  ]
+  ],
+  "idf.flashType": "JTAG"
 }
