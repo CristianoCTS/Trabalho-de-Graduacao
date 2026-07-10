@@ -1,4 +1,0 @@
-dependencies:
-  espressif/led_strip: "^3.0.0"
-  espressif/mqtt:
-    version: ">=1.0.0"
