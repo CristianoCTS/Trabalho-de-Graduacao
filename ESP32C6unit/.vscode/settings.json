@@ -4,7 +4,7 @@
   "idf.openOcdConfigs": [
     "board/esp32c6-builtin.cfg"
   ],
-  "idf.portWin": "detect",
+  "idf.portWin": "COM14",
   "idf.currentSetup": "C:\\esp\\v6.0\\esp-idf",
   "idf.customExtraVars": {
     "IDF_TARGET": "esp32c6"
@@ -15,5 +15,5 @@
     "--query-driver=**",
     "--compile-commands-dir=c:\\TG\\ESP32C6unit\\build"
   ],
-  "idf.flashType": "JTAG"
+  "idf.flashType": "UART"
 }
