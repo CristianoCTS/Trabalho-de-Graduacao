@@ -3,88 +3,79 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
-#include "led_strip.h"
 #include "esp_event.h"
 #include "coms.h"
+#include "MQTT.h"
+#include "esp_timer.h"
+#include <stdlib.h>
 
-#define LED GPIO_NUM_8 //LED
-#define LED_all GPIO_NUM_10 //GPIO para mandar para all
-#define LED_one GPIO_NUM_11 //GPIO para mandar para apenas um
-#define LED_two GPIO_NUM_12 //GPIO para mandar para apenas um
+#define MinInterval 15
 
-static bool led_status = false; //Led apagado ou acesso
-static led_strip_handle_t led_strip; // Handle para o controle do LED
+int64_t Time = 0;
+int64_t LastTime = 0;
+int command = 0;
 char received_msg[20] = "";
-char buf[12];
-char instrucao[20] = "";
-int brokeri = 0;
-
-void configure_led(void) {
-    led_strip_config_t strip_config = {
-        .strip_gpio_num = LED,
-        .max_leds = 1,
-    };
-    led_strip_rmt_config_t rmt_config = {
-        .resolution_hz = 10 * 1000 * 1000,
-        .flags.with_dma = false,
-    };
-    led_strip_new_rmt_device(&strip_config, &rmt_config, &led_strip);
-    led_strip_clear(led_strip);
-}
-
-void set_led(bool state) {
-    if (state) {
-        led_strip_set_pixel(led_strip, 0, 16, 16, 16);
-        led_strip_refresh(led_strip);
-    } else {
-        led_strip_clear(led_strip);
-    }
-}
+char instrucao[20] = ""; //ABCDEFGHIJ
+float data[] = {25.0f, 0.0f, 0.0f}; // {Temperatura, Ocupacao, Mensagens}
+float old_data[] = {25.0f, 0.0f, 0.0f};
 
 void app_main(void) {
     //setup das conexões
     coms_init();
-    configure_led();
-
-    //Configuração dos botões
-    gpio_reset_pin(LED_all);
-    gpio_set_direction(LED_all, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(LED_all, GPIO_PULLUP_ONLY);
-    gpio_reset_pin(LED_one);
-    gpio_set_direction(LED_one, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(LED_one, GPIO_PULLUP_ONLY);
-    gpio_reset_pin(LED_two);
-    gpio_set_direction(LED_two, GPIO_MODE_INPUT);
-    gpio_set_pull_mode(LED_two, GPIO_PULLUP_ONLY);
     
     while (1) {
-        snprintf(buf, sizeof(buf), "%d", brokeri);
-        intercom_send(buf);
-        brokeri++;
-        if (brokeri > 50) {
-            brokeri = 0;
+        Time = esp_timer_get_time()/1000000;
+        if (data[1] == 1 && old_data[1] == 0) {
+            data[2] = 1;
+            intercom_send(data);
         }
+        memcpy(old_data, data, sizeof(data));
+
+        //Obtencao de dados------------------------------------------------
+        data[0]++; //obtido pelo sensor de temperatura
+        if (data[0] > 35) {
+            data[0] = 25;
+        }
+        data[1] = 1; //obtido pela cortina
+        data[2] = 0; //obtido pela lógica de tomada de decisões
+        //Obtencao de dados------------------------------------------------
+
+        //Comunicacao MQTT-------------------------------------------------
         intercom_read(instrucao);
-        if (gpio_get_level(LED_all) == 0 || strcmp(instrucao, "all") == 0) {
-            intracom_send("Toggle", -1);
-            vTaskDelay(pdMS_TO_TICKS(300));
+        if (instrucao[0] != '\0') {
+            int tA = atoi((char[]){instrucao[0], instrucao[1], '\0'}); // AB
+            int tB = atoi((char[]){instrucao[3], instrucao[4], '\0'}); // DE
+            int tC = atoi((char[]){instrucao[6], instrucao[7], '\0'}); // GH
+            int msgA = instrucao[2] - '0'; // C
+            int msgB = instrucao[5] - '0'; // F
+            int msgC = instrucao[8] - '0'; // I
+            command = instrucao[9] - '0';  // J
+            if (command == 1) {
+                LastTime = Time;
+                printf("Intercom: Request in %lld\n", (long long)LastTime);
+            }
         }
-        if (gpio_get_level(LED_one) == 0 || strcmp(instrucao, "one") == 0) {
-            intracom_send("Toggle", 0);
-            vTaskDelay(pdMS_TO_TICKS(300));
+        if ((Time - LastTime >= MinInterval) && (command == 1)) {
+            intercom_send(data);
+            command = 0;
+            LastTime = Time;
+            printf("Intercom: Sent at %lld\n", (long long)LastTime);
+            //logica que altera a temperatura do ar
         }
-        if (gpio_get_level(LED_two) == 0 || strcmp(instrucao, "two") == 0) {
-            intracom_send("Toggle", 1);
-            vTaskDelay(pdMS_TO_TICKS(300));
-        }
-        vTaskDelay(pdMS_TO_TICKS(1000));
+        //Comunicacao MQTT-------------------------------------------------
+
+        //Comunicacao ESPNOW-----------------------------------------------
         intracom_read(received_msg);
-        printf("Received: %s\n", received_msg);
-        if (strcmp(received_msg, "Toggle") == 0) {
-            memset(received_msg, 0, sizeof(received_msg));
-            led_status = !led_status;
-            set_led(led_status);
-            printf("LED: %s\n", led_status ? "ON" : "OFF");
+        if (received_msg[0] != '\0') {
+            printf("Intracom: Received %s at %lld\n", received_msg, (long long)Time);
+            //logica que interpreta a mensagem
         }
+        if (data[2] != 0.0f) {
+            intracom_send(&data[2], -1);
+            printf("Intracom: Sent %s at %lld\n", data[2], (long long)Time);
+        }
+        //Comunicacao ESPNOW-----------------------------------------------
+
+        vTaskDelay(pdMS_TO_TICKS(200));
     }
 }
