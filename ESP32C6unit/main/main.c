@@ -29,11 +29,11 @@ void app_main(void) {
     //setup das conexões
     coms_init();
     Time = esp_timer_get_time()/1000000;
-    LastTime = Time;
+    LastTime = 0;
     
     while (1) {
         Time = esp_timer_get_time()/1000000;
-        if ((Time - LastTime >= MinInterval) && (data[1] == 1 && old_data[1] == 0)) {
+        if (data[1] == 1 && old_data[1] == 0) {
             if (ESP_Iam == 0) {intracom_send(&synchronize, -1);}
             intercom_send(data);
             LastTime = Time;
@@ -46,10 +46,6 @@ void app_main(void) {
             data[0] = 25;
         }
         data[1] = 1; //obtido pela cortina
-        data[2]++; //obtido pela lógica de tomada de decisões
-        if (data[2] == 9) {
-            data[2] = 0;
-        }
         //Obtencao de dados------------------------------------------------
 
         //Comunicacao MQTT-------------------------------------------------
@@ -81,6 +77,7 @@ void app_main(void) {
             (ESP_Iam != 0) && !ESP0on) {
             printf("ESP0 blacked out\n");
             wake_up(wakeup_data);
+            intracom_send(&synchronize, -1);
         }
         if ((Time - LastTime >= (MinInterval + 10)) && (ESP_Iam != 0)) {
             ESP0on = false;
