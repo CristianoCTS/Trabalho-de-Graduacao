@@ -156,7 +156,7 @@ void intercom_read(char *out) {
 
 void intracom_send(const float *data, int slave_index) {
     char message[16];
-    snprintf(message, sizeof(message), "%f", data);
+    sprintf(message, "%f", *data);
     if (slave_index == -1) {
         printf("Sent to all\n");
         for (int i = 0; i < (NUM_ESPS - 1); i++) {
