@@ -77,7 +77,6 @@ void app_main(void) {
             (ESP_Iam != 0) && !ESP0on) {
             printf("ESP0 blacked out\n");
             wake_up(wakeup_data);
-            intracom_send(&synchronize, -1);
         }
         if ((Time - LastTime >= (MinInterval + 10)) && (ESP_Iam != 0)) {
             ESP0on = false;
