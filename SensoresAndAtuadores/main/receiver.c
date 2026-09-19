@@ -17,6 +17,8 @@ static const char *TAG = "IR_RX";
 
 static QueueHandle_t s_receive_queue;
 static rmt_symbol_word_t s_raw_symbols[IR_RX_MAX_SYMBOLS];
+static rmt_channel_handle_t s_rx_channel = NULL;
+static rmt_receive_config_t s_receive_config;
 
 static bool IRAM_ATTR rmt_rx_done_callback(rmt_channel_handle_t channel,
                                             const rmt_rx_done_event_data_t *edata,
@@ -42,7 +44,22 @@ static void print_as_source_code(const rmt_symbol_word_t *symbols, size_t num_sy
     printf("----------------------\n\n");
 }
 
-void readIR(void)
+// Tarefa que fica bloqueada na fila esperando um pacote IR completo.
+// O bloqueio aqui nao trava o resto do sistema: as outras tarefas seguem rodando.
+static void TarefaReceptorIR(void *pvParameters)
+{
+    rmt_rx_done_event_data_t rx_data;
+
+    while (1) {
+        if (xQueueReceive(s_receive_queue, &rx_data, portMAX_DELAY) == pdTRUE) {
+            print_as_source_code(rx_data.received_symbols, rx_data.num_symbols);
+            ESP_ERROR_CHECK(rmt_receive(s_rx_channel, s_raw_symbols,
+                                         sizeof(s_raw_symbols), &s_receive_config));
+        }
+    }
+}
+
+void receiver_init(void)
 {
     printf("=========================================\n");
     printf("Receptor IR (ESP-IDF/RMT) iniciado no GPIO %d!\n", IR_RX_GPIO_NUM);
@@ -55,7 +72,6 @@ void readIR(void)
         return;
     }
 
-    rmt_channel_handle_t rx_channel = NULL;
     rmt_rx_channel_config_t rx_channel_cfg = {
         .clk_src = RMT_CLK_SRC_DEFAULT,
         .resolution_hz = IR_RESOLUTION_HZ,
@@ -64,28 +80,24 @@ void readIR(void)
         .flags.invert_in = false,
         .flags.with_dma = false,
     };
-    ESP_ERROR_CHECK(rmt_new_rx_channel(&rx_channel_cfg, &rx_channel));
+    ESP_ERROR_CHECK(rmt_new_rx_channel(&rx_channel_cfg, &s_rx_channel));
 
     rmt_rx_event_callbacks_t cbs = {
         .on_recv_done = rmt_rx_done_callback,
     };
-    ESP_ERROR_CHECK(rmt_rx_register_event_callbacks(rx_channel, &cbs, s_receive_queue));
-    ESP_ERROR_CHECK(rmt_enable(rx_channel));
+    ESP_ERROR_CHECK(rmt_rx_register_event_callbacks(s_rx_channel, &cbs, s_receive_queue));
+    ESP_ERROR_CHECK(rmt_enable(s_rx_channel));
 
-    rmt_receive_config_t receive_config = {
-        .signal_range_min_ns = IR_RX_MIN_GLITCH_NS,
-        .signal_range_max_ns = IR_RX_IDLE_TIMEOUT_NS,
-    };
+    s_receive_config.signal_range_min_ns = IR_RX_MIN_GLITCH_NS;
+    s_receive_config.signal_range_max_ns = IR_RX_IDLE_TIMEOUT_NS;
 
-    ESP_ERROR_CHECK(rmt_receive(rx_channel, s_raw_symbols,
-                                 sizeof(s_raw_symbols), &receive_config));
+    ESP_ERROR_CHECK(rmt_receive(s_rx_channel, s_raw_symbols,
+                                 sizeof(s_raw_symbols), &s_receive_config));
 
-    rmt_rx_done_event_data_t rx_data;
-    while (1) {
-        if (xQueueReceive(s_receive_queue, &rx_data, portMAX_DELAY) == pdTRUE) {
-            print_as_source_code(rx_data.received_symbols, rx_data.num_symbols);
-            ESP_ERROR_CHECK(rmt_receive(rx_channel, s_raw_symbols,
-                                         sizeof(s_raw_symbols), &receive_config));
-        }
+    BaseType_t r = xTaskCreate(TarefaReceptorIR, "TarefaRxIR", 4096, NULL, 4, NULL);
+    if (r != pdPASS) {
+        ESP_LOGE(TAG, "[ERRO CRITICO] Falha ao criar a Tarefa do Receptor IR!");
+    } else {
+        ESP_LOGI(TAG, "[RTOS] Tarefa do Receptor IR iniciada com sucesso.");
     }
 }

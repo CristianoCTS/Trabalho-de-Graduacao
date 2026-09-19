@@ -10,6 +10,7 @@
 #include "esp_log.h"
 #include "driver/rmt_tx.h"
 #include "driver/gpio.h"
+#include "led_strip.h"
 #include "emiter.h"
 
 static const char *TAG = "ATUADOR_IR";
@@ -18,16 +19,24 @@ static rmt_channel_handle_t s_ir_tx_channel;
 static rmt_encoder_handle_t s_ir_copy_encoder;
 
 
+// --------- Pino e parametros do LED IR (substitui IRsend) ---------
 #define IR_TX_GPIO_NUM      7
-#define IR_RESOLUTION_HZ    1000000
+#define IR_RESOLUTION_HZ    1000000   // 1 tick = 1us, mesma unidade do IRremoteESP8266
 #define IR_CARRIER_FREQ_HZ  38000
 #define IR_CARRIER_DUTY     0.33f
 
+// --------- Pino e parametros do botao (substitui o gatilho por MQTT) ---------
 #define IR_BTN_GPIO_NUM          GPIO_NUM_0
-#define IR_BTN_DEBOUNCE_MS       50
-#define IR_BTN_POLL_INTERVAL_MS  20
-#define IR_BTN_CICLO_LEN         4
+#define IR_BTN_DEBOUNCE_MS       50     // tempo de estabilizacao apos detectar a borda
+#define IR_BTN_POLL_INTERVAL_MS  20     // intervalo de leitura do pino
+#define IR_BTN_CICLO_LEN         4      // quantidade de comandos no ciclo (antes do reset)
 
+// --------- LED RGB embutido na placa (WS2812 no ESP32-C6-DevKit) ---------
+#define RGB_LED_GPIO         8
+#define RGB_LED_BLINK_MS     80    // duracao do pulso de cada piscada
+static led_strip_handle_t s_rgb_led;
+
+// Comandos reais do controle (capturados em CodigosIR.txt)
 typedef enum {
     CMD_ON_OFF = 0,
     CMD_MODE,
@@ -46,16 +55,19 @@ static const char *ir_comando_nome(ir_comando_t cmd)
     }
 }
 
+// Ajuste aqui os comandos disparados no 1o, 2o, 3o e 4o clique.
+// No 5o clique a contagem apenas reseta, sem enviar nada.
 static const int s_cicloComandos[IR_BTN_CICLO_LEN] = { CMD_ON_OFF, CMD_MODE, CMD_TEMP_BAIXO, CMD_TEMP_ALTO };
 
-// static const uint16_t rawOnOff[198] = {6147, 7379, 558, 1610, 558, 1610, 558, 1611, 557, 1611, 558, 1610, 558, 1610, 558, 1611, 557, 1612, 558, 520, 558, 521, 558, 521, 557, 521, 558, 521, 557, 521, 558, 521, 557, 520, 558, 1611, 557, 1611, 557, 1611, 558, 1610, 558, 1610, 558, 1611, 557, 1611, 557, 1612, 558, 521, 558, 520, 558, 521, 557, 522, 557, 521, 558, 521, 557, 522, 557, 520, 558, 1611, 557, 1611, 557, 1611, 557, 1611, 557, 1611, 558, 1610, 558, 1611, 557, 1612, 557, 521, 558, 521, 557, 521, 558, 521, 558, 521, 557, 522, 557, 521, 557, 521, 557, 1612, 557, 522, 557, 520, 557, 1612, 556, 1612, 557, 1611, 557, 1612, 556, 1613, 557, 520, 557, 1611, 557, 1613, 557, 521, 557, 522, 557, 522, 556, 522, 557, 521, 556, 1613, 556, 522, 556, 1612, 557, 521, 556, 1613, 556, 522, 556, 1635, 533, 1613, 556, 522, 556, 1637, 533, 522, 555, 1613, 556, 522, 556, 1636, 533, 523, 555, 546, 533, 545, 533, 1637, 532, 522, 556, 1636, 533, 544, 534, 1636, 533, 546, 532, 545, 533, 1636, 533, 545, 532, 1637, 533, 544, 533, 1637, 532, 546, 532, 1658, 533, 1637, 533, 7410, 533, 0};
-// static const uint16_t rawMode[198] = {6148, 7378, 559, 1609, 559, 1610, 558, 1610, 558, 1610, 559, 1609, 559, 1610, 558, 1609, 559, 1611, 558, 520, 558, 520, 559, 520, 559, 519, 559, 521, 558, 520, 558, 521, 558, 519, 585, 1607, 558, 1610, 558, 1610, 558, 1611, 558, 1610, 558, 1610, 558, 1610, 558, 1611, 558, 520, 559, 520, 558, 521, 558, 520, 558, 521, 559, 520, 558, 521, 558, 520, 558, 520, 558, 1611, 557, 1611, 557, 1611, 557, 1611, 558, 1610, 558, 1610, 558, 1610, 557, 1612, 557, 522, 557, 521, 558, 521, 558, 521, 557, 522, 557, 521, 557, 521, 558, 1611, 557, 521, 557, 1612, 557, 520, 558, 1612, 557, 521, 557, 521, 557, 1613, 557, 520, 557, 1612, 557, 521, 557, 1612, 557, 520, 557, 1612, 557, 1612, 557, 521, 557, 521, 558, 1611, 557, 1612, 557, 520, 557, 1611, 557, 1613, 556, 521, 557, 1612, 556, 1612, 557, 522, 557, 521, 556, 1613, 557, 522, 556, 521, 556, 1614, 555, 546, 533, 545, 533, 1613, 556, 545, 533, 1636, 533, 544, 534, 1636, 532, 546, 533, 545, 533, 1636, 533, 545, 533, 1636, 533, 544, 534, 1636, 533, 544, 533, 1636, 533, 1636, 533, 7411, 533, 0};
-// static const uint16_t rawTempBaixo[198] = {6147, 7378, 559, 1610, 559, 1610, 558, 1610, 558, 1610, 559, 1610, 558, 1610, 558, 1610, 558, 1611, 558, 520, 559, 520, 558, 520, 559, 520, 559, 520, 558, 521, 557, 521, 558, 520, 558, 1610, 558, 1611, 557, 1611, 557, 1611, 558, 1610, 558, 1610, 558, 1610, 558, 1611, 558, 521, 558, 520, 558, 521, 558, 520, 558, 521, 558, 520, 558, 521, 558, 521, 558, 520, 558, 520, 558, 1611, 557, 1611, 558, 1610, 558, 1611, 557, 1611, 557, 1611, 557, 1611, 558, 1611, 558, 521, 557, 521, 558, 521, 557, 522, 557, 521, 557, 521, 557, 1612, 557, 521, 557, 1612, 556, 521, 557, 1611, 557, 1611, 558, 1611, 557, 1612, 557, 520, 558, 1612, 557, 521, 557, 1612, 557, 522, 556, 522, 557, 522, 557, 520, 557, 1613, 557, 521, 557, 521, 557, 1611, 558, 1611, 557, 522, 557, 520, 557, 1613, 556, 521, 557, 1611, 558, 1612, 557, 521, 557, 521, 557, 1612, 556, 1612, 558, 522, 556, 520, 557, 1612, 557, 521, 557, 1613, 556, 521, 556, 1613, 557, 522, 556, 521, 557, 1613, 556, 521, 557, 1614, 555, 545, 533, 1613, 556, 544, 533, 1636, 532, 1615, 555, 7388, 556, 0};
-// static const uint16_t rawTempAlto[198] = {6122, 7377, 559, 1609, 558, 1611, 558, 1609, 559, 1609, 559, 1610, 559, 1610, 558, 1610, 558, 1611, 558, 521, 557, 521, 558, 521, 558, 520, 558, 521, 558, 520, 558, 521, 558, 520, 558, 1610, 558, 1611, 557, 1611, 557, 1611, 557, 1610, 559, 1610, 558, 1610, 558, 1611, 558, 521, 557, 521, 558, 521, 558, 521, 557, 521, 558, 521, 557, 521, 558, 520, 558, 1611, 558, 520, 558, 1610, 558, 1610, 557, 1612, 557, 1611, 557, 1611, 557, 1612, 557, 521, 557, 1612, 557, 521, 558, 521, 558, 521, 557, 521, 557, 521, 558, 520, 557, 1612, 557, 521, 557, 1612, 557, 520, 558, 1611, 557, 1611, 557, 1611, 557, 1613, 557, 520, 558, 1611, 558, 520, 558, 1611, 558, 521, 557, 521, 557, 522, 557, 521, 557, 521, 557, 1613, 557, 520, 557, 1612, 557, 1612, 557, 521, 557, 520, 558, 1611, 557, 1612, 557, 520, 557, 1613, 557, 521, 557, 521, 557, 1611, 557, 1612, 557, 522, 557, 520, 557, 1613, 556, 521, 557, 1613, 557, 520, 558, 1611, 558, 521, 557, 521, 557, 1612, 557, 521, 557, 1612, 557, 520, 557, 1613, 556, 521, 557, 1611, 557, 1613, 557, 7387, 556, 0};
+// ================= CODIGOS REAIS CAPTURADOS PELO RECEPTOR (CodigosIR.txt) =
+// Cada botao foi capturado varias vezes para checar consistencia; foi usada
+// a 1a captura de cada grupo como referencia (as demais ficaram praticamente
+// identicas, a menos de pequenas variacoes de ruido do TSOP).
 static const uint16_t rawOnOff[198] = {6147, 7378, 559, 1610, 559, 1610, 558, 1610, 558, 1610, 559, 1610, 558, 1610, 558, 1610, 558, 1611, 558, 520, 559, 520, 558, 520, 559, 520, 559, 520, 558, 521, 557, 521, 558, 520, 558, 1610, 558, 1611, 557, 1611, 557, 1611, 558, 1610, 558, 1610, 558, 1610, 558, 1611, 558, 521, 558, 520, 558, 521, 558, 520, 558, 521, 558, 520, 558, 521, 558, 521, 558, 520, 558, 520, 558, 1611, 557, 1611, 558, 1610, 558, 1611, 557, 1611, 557, 1611, 557, 1611, 558, 1611, 558, 521, 557, 521, 558, 521, 557, 522, 557, 521, 557, 521, 557, 1612, 557, 521, 557, 1612, 556, 521, 557, 1611, 557, 1611, 558, 1611, 557, 1612, 557, 520, 558, 1612, 557, 521, 557, 1612, 557, 522, 556, 522, 557, 522, 557, 520, 557, 1613, 557, 521, 557, 521, 557, 1611, 558, 1611, 557, 522, 557, 520, 557, 1613, 556, 521, 557, 1611, 558, 1612, 557, 521, 557, 521, 557, 1612, 556, 1612, 558, 522, 556, 520, 557, 1612, 557, 521, 557, 1613, 556, 521, 556, 1613, 557, 522, 556, 521, 557, 1613, 556, 521, 557, 1614, 555, 545, 533, 1613, 556, 544, 533, 1636, 532, 1615, 555, 7388, 556, 0};
 static const uint16_t rawMode[198] = {6147, 7378, 559, 1610, 559, 1610, 558, 1610, 558, 1610, 559, 1610, 558, 1610, 558, 1610, 558, 1611, 558, 520, 559, 520, 558, 520, 559, 520, 559, 520, 558, 521, 557, 521, 558, 520, 558, 1610, 558, 1611, 557, 1611, 557, 1611, 558, 1610, 558, 1610, 558, 1610, 558, 1611, 558, 521, 558, 520, 558, 521, 558, 520, 558, 521, 558, 520, 558, 521, 558, 521, 558, 520, 558, 520, 558, 1611, 557, 1611, 558, 1610, 558, 1611, 557, 1611, 557, 1611, 557, 1611, 558, 1611, 558, 521, 557, 521, 558, 521, 557, 522, 557, 521, 557, 521, 557, 1612, 557, 521, 557, 1612, 556, 521, 557, 1611, 557, 1611, 558, 1611, 557, 1612, 557, 520, 558, 1612, 557, 521, 557, 1612, 557, 522, 556, 522, 557, 522, 557, 520, 557, 1613, 557, 521, 557, 521, 557, 1611, 558, 1611, 557, 522, 557, 520, 557, 1613, 556, 521, 557, 1611, 558, 1612, 557, 521, 557, 521, 557, 1612, 556, 1612, 558, 522, 556, 520, 557, 1612, 557, 521, 557, 1613, 556, 521, 556, 1613, 557, 522, 556, 521, 557, 1613, 556, 521, 557, 1614, 555, 545, 533, 1613, 556, 544, 533, 1636, 532, 1615, 555, 7388, 556, 0};
 static const uint16_t rawTempBaixo[198] = {6147, 7378, 559, 1610, 559, 1610, 558, 1610, 558, 1610, 559, 1610, 558, 1610, 558, 1610, 558, 1611, 558, 520, 559, 520, 558, 520, 559, 520, 559, 520, 558, 521, 557, 521, 558, 520, 558, 1610, 558, 1611, 557, 1611, 557, 1611, 558, 1610, 558, 1610, 558, 1610, 558, 1611, 558, 521, 558, 520, 558, 521, 558, 520, 558, 521, 558, 520, 558, 521, 558, 521, 558, 520, 558, 520, 558, 1611, 557, 1611, 558, 1610, 558, 1611, 557, 1611, 557, 1611, 557, 1611, 558, 1611, 558, 521, 557, 521, 558, 521, 557, 522, 557, 521, 557, 521, 557, 1612, 557, 521, 557, 1612, 556, 521, 557, 1611, 557, 1611, 558, 1611, 557, 1612, 557, 520, 558, 1612, 557, 521, 557, 1612, 557, 522, 556, 522, 557, 522, 557, 520, 557, 1613, 557, 521, 557, 521, 557, 1611, 558, 1611, 557, 522, 557, 520, 557, 1613, 556, 521, 557, 1611, 558, 1612, 557, 521, 557, 521, 557, 1612, 556, 1612, 558, 522, 556, 520, 557, 1612, 557, 521, 557, 1613, 556, 521, 556, 1613, 557, 522, 556, 521, 557, 1613, 556, 521, 557, 1614, 555, 545, 533, 1613, 556, 544, 533, 1636, 532, 1615, 555, 7388, 556, 0};
 static const uint16_t rawTempAlto[198] = {6147, 7378, 559, 1610, 559, 1610, 558, 1610, 558, 1610, 559, 1610, 558, 1610, 558, 1610, 558, 1611, 558, 520, 559, 520, 558, 520, 559, 520, 559, 520, 558, 521, 557, 521, 558, 520, 558, 1610, 558, 1611, 557, 1611, 557, 1611, 558, 1610, 558, 1610, 558, 1610, 558, 1611, 558, 521, 558, 520, 558, 521, 558, 520, 558, 521, 558, 520, 558, 521, 558, 521, 558, 520, 558, 520, 558, 1611, 557, 1611, 558, 1610, 558, 1611, 557, 1611, 557, 1611, 557, 1611, 558, 1611, 558, 521, 557, 521, 558, 521, 557, 522, 557, 521, 557, 521, 557, 1612, 557, 521, 557, 1612, 556, 521, 557, 1611, 557, 1611, 558, 1611, 557, 1612, 557, 520, 558, 1612, 557, 521, 557, 1612, 557, 522, 556, 522, 557, 522, 557, 520, 557, 1613, 557, 521, 557, 521, 557, 1611, 558, 1611, 557, 522, 557, 520, 557, 1613, 556, 521, 557, 1611, 558, 1612, 557, 521, 557, 521, 557, 1612, 556, 1612, 558, 522, 556, 520, 557, 1612, 557, 521, 557, 1613, 556, 521, 556, 1613, 557, 522, 556, 521, 557, 1613, 556, 521, 557, 1614, 555, 545, 533, 1613, 556, 544, 533, 1636, 532, 1615, 555, 7388, 556, 0};
+// ===========================================================================
 
 #define RAW_LEN(arr) (sizeof(arr) / sizeof((arr)[0]))
 
@@ -111,35 +123,71 @@ static void ir_send_raw(const uint16_t *raw, size_t len)
     free(symbols);
 }
 
+static void rgb_led_init(void)
+{
+    led_strip_config_t strip_config = {
+        .strip_gpio_num = RGB_LED_GPIO,
+        .max_leds = 1,
+        .color_component_format = LED_STRIP_COLOR_COMPONENT_FMT_GRB,
+        .led_model = LED_MODEL_WS2812,
+        .flags.invert_out = false,
+    };
+    // Backend SPI em vez de RMT: o ESP32C6 so tem 2 canais de TX no RMT e o
+    // canal do IR ja consome os 2 (mem_block_symbols=64 usa 2 blocos de 48
+    // simbolos). Usando SPI aqui, o LED nao disputa canal com o IR.
+    led_strip_spi_config_t spi_config = {
+        .spi_bus = SPI2_HOST,
+        .flags.with_dma = true,
+    };
+    ESP_ERROR_CHECK(led_strip_new_spi_device(&strip_config, &spi_config, &s_rgb_led));
+    led_strip_clear(s_rgb_led);
+}
+
+// Pisca o LED da placa uma vez. Usada como feedback visual de clique no botao.
+// cor: r/g/b de 0-255. Bloqueia a tarefa chamadora por RGB_LED_BLINK_MS.
+static void rgb_led_blink(uint8_t r, uint8_t g, uint8_t b)
+{
+    led_strip_set_pixel(s_rgb_led, 0, r, g, b);
+    led_strip_refresh(s_rgb_led);
+    vTaskDelay(pdMS_TO_TICKS(RGB_LED_BLINK_MS));
+    led_strip_clear(s_rgb_led);
+}
+
 static void ir_btn_init(void)
 {
     gpio_config_t btn_cfg = {
         .pin_bit_mask = (1ULL << IR_BTN_GPIO_NUM),
         .mode = GPIO_MODE_INPUT,
-        .pull_up_en = GPIO_PULLUP_ENABLE,
+        .pull_up_en = GPIO_PULLUP_ENABLE,     // botao liga o pino ao GND, precisa do pull-up interno
         .pull_down_en = GPIO_PULLDOWN_DISABLE,
-        .intr_type = GPIO_INTR_DISABLE,
+        .intr_type = GPIO_INTR_DISABLE,        // leitura por polling, sem interrupcao
     };
     ESP_ERROR_CHECK(gpio_config(&btn_cfg));
 }
 
 static void TarefaBotaoIR(void *pvParameters)
 {
-    int estadoAnterior = 1;
-    int contadorClique = 0;
+    int estadoAnterior = 1;   // solto = HIGH (pull-up)
+    int contadorClique = 0;   // 0,1,2 = indice no ciclo | 3 = proximo clique so reseta
 
     while (1) {
         int estadoAtual = gpio_get_level(IR_BTN_GPIO_NUM);
+
+        // Borda de descida: botao acabou de ser pressionado
         if (estadoAnterior == 1 && estadoAtual == 0) {
             vTaskDelay(pdMS_TO_TICKS(IR_BTN_DEBOUNCE_MS));
+
+            // Reconfirma o nivel apos o debounce para filtrar ruido/bounce
             if (gpio_get_level(IR_BTN_GPIO_NUM) == 0) {
                 if (contadorClique < IR_BTN_CICLO_LEN) {
                     int comando = s_cicloComandos[contadorClique];
                     ESP_LOGI(TAG, "[BOTAO] Clique #%d -> comando %s", contadorClique + 1, ir_comando_nome((ir_comando_t)comando));
+                    rgb_led_blink(255, 255, 255);   // pulso branco = clique valido
                     xQueueSend(filaComandosAr, &comando, portMAX_DELAY);
                     contadorClique++;
                 } else {
                     ESP_LOGI(TAG, "[BOTAO] Clique #%d -> reset da contagem", contadorClique + 1);
+                    rgb_led_blink(255, 140, 0);     // pulso ambar = reset da contagem
                     contadorClique = 0;
                 }
                 estadoAtual = 0;
@@ -171,7 +219,7 @@ static void TarefaDisparoIR(void *pvParameters)
                 }
 
                 if (tentativa < 2) {
-                    vTaskDelay(pdMS_TO_TICKS(1500));
+                    vTaskDelay(pdMS_TO_TICKS(1000));
                 }
             }
         }
@@ -183,6 +231,7 @@ void emiter_init(void)
 {
     ir_tx_init();
     ir_btn_init();
+    rgb_led_init();
 
     filaComandosAr = xQueueCreate(5, sizeof(int));
     if (filaComandosAr == NULL) {
