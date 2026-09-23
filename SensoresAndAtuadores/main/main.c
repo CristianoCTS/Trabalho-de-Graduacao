@@ -1,33 +1,33 @@
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "esp_log.h"
-#include "sdkconfig.h"
-#include "receiver.h"
+#include "driver/gpio.h"
+#include "curtain.h"
 #include "emiter.h"
-#include "temperature.h"
 #include "humidity.h"
+#include "temperature.h"
+
+float DS18B20 = 0.0f;
+dht22_reading_t DHT22 = { 0.0f, 0.0f };
+int16_t ocupacao = 0;
 
 void app_main(void)
 {
+    curtain_init();
     emiter_init();
-    temperature_init();
-    // humidity_init();
-    receiver_init();   // retorna imediatamente, a escuta roda em tarefa propria
-
-    float temp_ds = 0.0f;
-    dht22_reading_t dht;
-
-    while (1) {
-        if (temperature_get(&temp_ds)) {
-            printf("[DS18B20] Temperatura: %.2f C\n", temp_ds);
+    DHT22_init();
+    DS18B20_init();
+    while (true) {
+        ocupacao += carga_termica;
+        carga_termica = 0;
+        if (DS18B20_read(&DS18B20)) {
+            printf("=====DS18B20: lido=====\n");
         }
-
-        // if (humidity_get(&dht)) {
-        //     printf("[DHT22]   Temperatura: %.1f C | Umidade: %.1f %%\n",
-        //            dht.temperature, dht.humidity);
-        // }
-
-        vTaskDelay(pdMS_TO_TICKS(3000));
+        if (DHT22_read(&DHT22)) {
+            printf("======DHT22: lido======\n");
+        }
+        printf("Ocupacao: %d\n", ocupacao);
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
+
 }
