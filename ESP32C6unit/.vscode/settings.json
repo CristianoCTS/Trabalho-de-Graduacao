@@ -15,5 +15,6 @@
     "--query-driver=**",
     "--compile-commands-dir=c:\\TG\\ESP32C6unit\\build"
   ],
-  "idf.flashType": "UART"
+  "idf.flashType": "UART",
+  "idf.port": "COM15"
 }

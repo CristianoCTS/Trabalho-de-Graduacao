@@ -15,3 +15,4 @@ extern ESP_t ESP[];
 extern int ESP_Iam;
 
 void mac_init(void);
+void discover_mac(void);
