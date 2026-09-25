@@ -1,120 +1,99 @@
-| Supported Targets | ESP32 | ESP32-C2 | ESP32-C3 | ESP32-C5 | ESP32-C6 | ESP32-C61 | ESP32-S2 | ESP32-S3 |
-| ----------------- | ----- | -------- | -------- | -------- | -------- | --------- | -------- | -------- |
+# Módulo de Comunicação Multi-ESP (Wi-Fi + MQTT + ESP-NOW)
 
-# ESPNOW Example
+Este projeto coordena vários ESP32 na mesma instalação: cada placa se identifica pelo próprio endereço MAC, troca dados locais entre si por **ESP-NOW** e publica/recebe informações de fora pela internet via **MQTT**. Este documento descreve o papel de cada arquivo e como as peças se encaixam.
 
-(See the README.md file in the upper level 'examples' directory for more information about examples.)
+## Visão geral do fluxo
 
-This example shows how to use ESPNOW of wifi. Example does the following steps:
+1. Ao ligar, cada ESP32 descobre **quem ele é** comparando seu próprio MAC com uma tabela fixa de dispositivos conhecidos (`MAC.c/h`).
+2. Em seguida, conecta ao Wi-Fi, ao broker MQTT e inicializa o ESP-NOW para falar com os outros ESPs da rede local (`coms.c/h`).
+3. O laço principal (`main.c`) usa duas vias de comunicação com propósitos diferentes:
+   - **"Intercom"** — via MQTT, para trocar dados com um serviço externo (ex.: um servidor/dashboard na internet).
+   - **"Intracom"** — via ESP-NOW, para trocar mensagens diretamente entre os ESPs da instalação, sem depender de internet.
 
-* Start WiFi.
-* Initialize ESPNOW.
-* Register ESPNOW sending or receiving callback function.
-* Add ESPNOW peer information.
-* Send and receive ESPNOW data.
+---
 
-This example need at least two ESP devices:
+## `MAC.c` / `MAC.h` — Identidade do dispositivo
 
-* In order to get the MAC address of the other device, Device1 firstly send broadcast ESPNOW data with 'state' set as 0.
-* When Device2 receiving broadcast ESPNOW data from Device1 with 'state' as 0, adds Device1 into the peer list.
-  Then start sending broadcast ESPNOW data with 'state' set as 1.
-* When Device1 receiving broadcast ESPNOW data with 'state' as 1, compares the local magic number with that in the data.
-  If the local one is bigger than that one, stop sending broadcast ESPNOW data and starts sending unicast ESPNOW data to Device2.
-* If Device2 receives unicast ESPNOW data, also stop sending broadcast ESPNOW data.
+Resolve um problema comum em sistemas com múltiplas placas idênticas rodando o mesmo firmware: **como cada ESP32 sabe qual é o seu papel** na rede, sem precisar gravar um firmware diferente para cada uma?
 
-In practice, if the MAC address of the other device is known, it's not required to send/receive broadcast ESPNOW data first,
-just add the device into the peer list and send/receive unicast ESPNOW data.
+A solução usada aqui é uma tabela fixa, escrita no código, que associa o **endereço MAC de fábrica** de cada placa (único e imutável por dispositivo) a um índice/papel na rede:
 
-There are a lot of "extras" on top of ESPNOW data, such as type, state, sequence number, CRC and magic in this example. These "extras" are
-not required to use ESPNOW. They are only used to make this example to run correctly. However, it is recommended that users add some "extras"
-to make ESPNOW data more safe and more reliable.
-
-## How to use example
-
-### Configure the project
-
-```
-idf.py menuconfig
+```c
+typedef struct {
+    int com;
+    uint8_t mac[6];
+    bool Iam;
+} ESP_t;
 ```
 
-* Set WiFi mode (station or SoftAP) under Example Configuration Options.
-* Set ESPNOW primary master key under Example Configuration Options.
-  This parameter must be set to the same value for sending and recving devices.
-* Set ESPNOW local master key under Example Configuration Options.
-  This parameter must be set to the same value for sending and recving devices.
-* Set Channel under Example Configuration Options.
-  The sending device and the recving device must be on the same channel.
-* Set Send count and Send delay under Example Configuration Options.
-* Set Send len under Example Configuration Options.
-* Set Enable Long Range Options.
-  When this parameter is enabled, the ESP32 device will send data at the PHY rate of 512Kbps or 256Kbps
-  then the data can be transmitted over long range between two ESP32 devices.
+- `mac` — o endereço MAC de 6 bytes daquele ESP específico.
+- `com` — um identificador numérico associado a esse dispositivo (por exemplo, um número de sala ou de nó).
+- `Iam` — marcado como `true` para a entrada que corresponde ao dispositivo que está rodando o código agora.
 
-### Build and Flash
+A tabela `ESP[]`, em `MAC.c`, lista os MACs de todos os ESP32 conhecidos da instalação.
 
-Build the project and flash it to the board, then run monitor tool to view serial output:
+**`mac_init()`** lê o MAC de fábrica do dispositivo atual (`esp_read_mac`, usando a interface Wi-Fi como referência), percorre a tabela `ESP[]` procurando uma correspondência exata, e:
+- marca `Iam = true` na entrada correspondente;
+- guarda o índice encontrado na variável global `ESP_Iam` (ou deixa em `-1` se o MAC não constar na tabela — ou seja, uma placa "desconhecida" rodando o firmware).
 
-```
-idf.py -p PORT flash monitor
-```
+`NUM_ESPS` é calculado automaticamente a partir do tamanho do array, então adicionar ou remover dispositivos da tabela não exige atualizar nenhum número manualmente.
 
-(To exit the serial monitor, type ``Ctrl-]``.)
-
-See the Getting Started Guide for full steps to configure and use ESP-IDF to build projects.
-
-## Example Output
-
-Here is the example of ESPNOW receiving device console output.
-
-```
-I (898) phy: phy_version: 3960, 5211945, Jul 18 2018, 10:40:07, 0, 0
-I (898) wifi: mode : sta (30:ae:a4:80:45:68)
-I (898) espnow_example: WiFi started
-I (898) ESPNOW: espnow [version: 1.0] init
-I (5908) espnow_example: Start sending broadcast data
-I (6908) espnow_example: send data to ff:ff:ff:ff:ff:ff
-I (7908) espnow_example: send data to ff:ff:ff:ff:ff:ff
-I (52138) espnow_example: send data to ff:ff:ff:ff:ff:ff
-I (52138) espnow_example: Receive 0th broadcast data from: 30:ae:a4:0c:34:ec, len: 200
-I (53158) espnow_example: send data to ff:ff:ff:ff:ff:ff
-I (53158) espnow_example: Receive 1th broadcast data from: 30:ae:a4:0c:34:ec, len: 200
-I (54168) espnow_example: send data to ff:ff:ff:ff:ff:ff
-I (54168) espnow_example: Receive 2th broadcast data from: 30:ae:a4:0c:34:ec, len: 200
-I (54168) espnow_example: Receive 0th unicast data from: 30:ae:a4:0c:34:ec, len: 200
-I (54678) espnow_example: Receive 1th unicast data from: 30:ae:a4:0c:34:ec, len: 200
-I (55668) espnow_example: Receive 2th unicast data from: 30:ae:a4:0c:34:ec, len: 200
+### API pública
+```c
+extern const int NUM_ESPS;
+extern ESP_t ESP[];
+extern int ESP_Iam;
+void mac_init(void);
 ```
 
-Here is the example of ESPNOW sending device console output.
+---
 
-```
-I (915) phy: phy_version: 3960, 5211945, Jul 18 2018, 10:40:07, 0, 0
-I (915) wifi: mode : sta (30:ae:a4:0c:34:ec)
-I (915) espnow_example: WiFi started
-I (915) ESPNOW: espnow [version: 1.0] init
-I (5915) espnow_example: Start sending broadcast data
-I (5915) espnow_example: Receive 41th broadcast data from: 30:ae:a4:80:45:68, len: 200
-I (5915) espnow_example: Receive 42th broadcast data from: 30:ae:a4:80:45:68, len: 200
-I (5925) espnow_example: Receive 44th broadcast data from: 30:ae:a4:80:45:68, len: 200
-I (5935) espnow_example: Receive 45th broadcast data from: 30:ae:a4:80:45:68, len: 200
-I (6965) espnow_example: send data to ff:ff:ff:ff:ff:ff
-I (6965) espnow_example: Receive 46th broadcast data from: 30:ae:a4:80:45:68, len: 200
-I (7975) espnow_example: send data to ff:ff:ff:ff:ff:ff
-I (7975) espnow_example: Receive 47th broadcast data from: 30:ae:a4:80:45:68, len: 200
-I (7975) espnow_example: Start sending unicast data
-I (7975) espnow_example: send data to 30:ae:a4:80:45:68
-I (9015) espnow_example: send data to 30:ae:a4:80:45:68
-I (9015) espnow_example: Receive 48th broadcast data from: 30:ae:a4:80:45:68, len: 200
-I (10015) espnow_example: send data to 30:ae:a4:80:45:68
-I (16075) espnow_example: send data to 30:ae:a4:80:45:68
-I (17075) espnow_example: send data to 30:ae:a4:80:45:68
-I (24125) espnow_example: send data to 30:ae:a4:80:45:68
-```
+## `coms.c` / `coms.h` — Conectividade e troca de mensagens
 
-## Troubleshooting
+Concentra toda a configuração de rede (Wi-Fi, MQTT, ESP-NOW) e expõe funções simples para enviar/receber dados, escondendo os detalhes de cada protocolo do resto do programa.
 
-If ESPNOW data can not be received from another device, maybe the two devices are not
-on the same channel or the primary key and local key are different.
+### Inicialização (`coms_init`)
+Executa, em sequência:
+1. `nvs_flash_init()` — inicializa o armazenamento não volátil, exigido internamente pelo driver de Wi-Fi do ESP-IDF.
+2. `mac_init()` — descobre a identidade do dispositivo (visto acima).
+3. `credentials_init()` — carrega as credenciais de rede (SSID, senha, dados do broker MQTT); essas definições vêm de um cabeçalho externo (`MQTT.h`) não incluído nesta pasta, que concentra strings sensíveis como senha de Wi-Fi e credenciais do MQTT.
+4. Configura e conecta o Wi-Fi em modo estação (`WIFI_MODE_STA`), aguardando bloqueado até a conexão ser confirmada pelo `event_handler`.
+5. Configura e conecta o cliente MQTT, também aguardando bloqueado até a confirmação de conexão.
+6. Monta a lista de "slaves" do ESP-NOW — todos os ESPs da tabela `ESP[]` exceto o próprio dispositivo — e registra cada um como *peer* do ESP-NOW, permitindo o envio direto de mensagens entre eles sem precisar de roteador.
 
-In real application, if the receiving device is in station mode only and it connects to an AP,
-modem sleep should be disabled. Otherwise, it may fail to revceive ESPNOW data from other devices.
+### Callbacks de evento
+- **`event_handler`** — reage a eventos do Wi-Fi: inicia a conexão quando a interface sobe, marca como conectado ao obter IP, e tenta reconectar automaticamente em caso de queda.
+- **`mqtt_event_handler`** — reage a eventos do cliente MQTT: marca conexão/desconexão, inscreve-se no tópico configurado (`MQTTsub`) ao conectar, e copia qualquer mensagem recebida para o buffer `mqtt_received`.
+- **`receive_msg`** — callback do ESP-NOW, acionado sempre que outro ESP da rede local envia algo; copia a mensagem recebida para o buffer `received_msg`.
+
+### Funções de envio/recebimento
+| Função | Via | Propósito |
+|---|---|---|
+| `intercom_send(data)` | MQTT | Publica um array de 3 floats como uma string `field1=...&field2=...&field3=...`, formato compatível com serviços de dashboard que aceitam esse padrão de campos. |
+| `wake_up(data)` | MQTT | Publica no mesmo formato, mas em um tópico diferente (`MQTT.pub[0]`), usado para tentar "acordar"/alertar via MQTT. |
+| `intercom_read(out)` | MQTT | Copia a última mensagem MQTT recebida para o buffer do chamador e limpa o buffer interno. |
+| `intracom_send(data, slave_index)` | ESP-NOW | Envia um único valor float (convertido em texto) a um ESP específico da rede local (`slave_index`), ou a todos de uma vez (`slave_index == -1`). |
+| `intracom_read(out_msg)` | ESP-NOW | Copia a última mensagem local recebida para o buffer do chamador e limpa o buffer interno. |
+
+---
+
+## `main.c` — Lógica de coordenação
+
+Orquestra os dois canais de comunicação em um laço contínuo, com uma lógica de sincronização e monitoramento de "presença" entre um ESP considerado principal (índice 0 na tabela, tratado como `ESP0`) e os demais.
+
+Principais elementos:
+- **`data[]`** — vetor de 3 floats representando o estado local do dispositivo: temperatura, ocupação e um terceiro campo de "mensagens", conforme o comentário no código.
+- **`old_data[]`** — cópia do estado da iteração anterior, usada para detectar mudanças (por exemplo, uma transição de ocupação de 0 para 1).
+- **Sincronização inicial**: quando a ocupação passa de 0 para 1, o dispositivo (se for o `ESP0`, índice 0) avisa os demais via `intracom_send` e publica seus dados via `intercom_send`, registrando o instante em `LastTime`.
+- **Leitura de instruções remotas**: `intercom_read` recebe uma string de 10 caracteres (`instrucao`) codificando três pares de números, três dígitos de mensagem e um código de comando (formato comentado no código como `ABCDEFGHIJ`), decodificados caractere a caractere com `atoi`/aritmética de char.
+- **Janela de heartbeat**: se um determinado intervalo de tempo (`MinInterval`) se passa sem confirmação do `ESP0`, os demais dispositivos assumem que ele pode estar "apagado" (`blacked_out`) e tentam acordá-lo via `wake_up` (MQTT).
+- **Leitura do canal local**: `intracom_read` verifica mensagens ESP-NOW recebidas, interpretando valores numéricos especiais (`100.0` como sinal de sincronização, `200.0` como confirmação de que o `ESP0` continua ativo).
+- O laço roda a cada 200 ms (`vTaskDelay`).
+
+> Os trechos de obtenção de dados (`data[0]++`, `data[1] = 1`) estão como placeholders/simulação no código atual — comentados como "obtido pelo sensor de temperatura" e "obtido pela cortina" — indicando que a integração real com os sensores físicos ainda será conectada a essas variáveis.
+
+---
+
+## Dependências externas não incluídas nesta pasta
+
+- **`MQTT.h`** — não está entre os arquivos aqui descritos, mas é referenciado por `main.c` e `coms.c`. Deve conter as definições de credenciais e configuração usadas por `coms_init` e pelas funções de publicação: `SSID`, `SSIDp`, `HOSTNAME`, `MQTT_BROKER`, `MQTT_port`, `MQTTc`, `MQTTu`, `MQTTp`, `MQTTsub`, `MQTTpub`, além da função `credentials_init()` e da estrutura `MQTT` usada em `wake_up` (`MQTT.pub[0]`).
