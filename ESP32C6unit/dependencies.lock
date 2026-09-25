@@ -23,9 +23,30 @@ dependencies:
     source:
       type: idf
     version: 6.0.0
+  jorgecis/irremoteidf:
+    component_hash: 159ad436160661be619cf5dce388f850b525fd21c13bedb661ef08536ba3b2b8
+    dependencies:
+    - name: idf
+      require: private
+      version: '>=5.0'
+    source:
+      registry_url: https://components.espressif.com/
+      type: service
+    targets:
+    - esp32
+    - esp32s2
+    - esp32s3
+    - esp32c2
+    - esp32c3
+    - esp32c5
+    - esp32c6
+    - esp32h2
+    - esp32p4
+    version: 1.0.0
 direct_dependencies:
 - espressif/led_strip
 - espressif/mqtt
-manifest_hash: d7055deb06161c3faec3e1616b7fe59b37506d87fc39398111071858bdb01357
+- jorgecis/irremoteidf
+manifest_hash: e8fadd61925a04453b583997a6593af8c51e1583cd0f355481bd4fee53cb595f
 target: esp32c6
 version: 3.0.0

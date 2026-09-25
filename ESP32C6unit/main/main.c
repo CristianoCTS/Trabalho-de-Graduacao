@@ -1,5 +1,6 @@
 #include <string.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
@@ -7,7 +8,10 @@
 #include "coms.h"
 #include "MQTT.h"
 #include "esp_timer.h"
-#include <stdlib.h>
+#include "curtain.h"
+#include "emiter.h"
+#include "humidity.h"
+#include "temperature.h"
 
 #define broker_interval 15
 #define data_interval 8
@@ -15,7 +19,7 @@
 float synchronize = 100.0f;
 
 bool blacked_out = false;
-bool ESP0on = true;
+bool HVACon = false;
 int64_t Time = 0;
 int64_t LastBrokerMsg = 0;
 int64_t LastDataMngt = 0;
@@ -23,15 +27,22 @@ int command = 0;
 char received_msg[20] = "";
 char wellnescheck[20] = "";
 char instrucao[20] = ""; //ABCDEFGHIJ
-float data[] = {25.0f, 0.0f, 0.0f}; // {Temperatura, Ocupacao, Mensagens}
-float old_data[] = {25.0f, 0.0f, 0.0f};
-float wakeup_data[] = {25.0f, 0.0f, 9.0f};
+float data[] = {25.0f, 25.0f, 0.0f, 0.0f, 0.0f}; // {DS18B20, DHT22_t, DHT22_h, Ocupacao, Mensagens}
+float old_data[] = {25.0f, 25.0f, 0.0f, 0.0f, 0.0f};
+float wakeup_data[] = {25.0f, 25.0f, 0.0f, 0.0f,9.0f};
 float last_temp = 25.0f;
 float temp_alvo = 25.0f;
 float broker_msg = 0.0f;
+float DS18B20 = 0.0f;
+dht22_reading_t DHT22 = {0.0f, 0.0f};
+emiter_cmd_t cmd = {0};
 
 void app_main(void) {
     //setup das conexões
+    curtain_init();
+    emiter_init();
+    DHT22_init();
+    DS18B20_init();
     coms_init();
     Time = esp_timer_get_time()/1000000;
     LastBrokerMsg = 0;
@@ -39,23 +50,38 @@ void app_main(void) {
     
     while (1) {
         Time = esp_timer_get_time()/1000000;
+        memset(&cmd, 0, sizeof(cmd));
         
         //Comunicacao MQTT-------------------------------------------------
-        if (data[1] == 1 && old_data[1] == 0) { // 0 segundos
+        if (data[3] == 1 && old_data[3] == 0) { // 0 segundos
             if (ESP_Iam == 0) {intracom_send(&synchronize, -1);}
             intercom_send(data);
             memcpy(old_data, data, sizeof(data));
+            memset(&cmd, 0, sizeof(cmd));
+            cmd.power = EMITER_ON;
+            HVACon = true;
+            if (!send_ir_command(&cmd)) {
+                HVACon = false;
+                printf("Falha ao enviar comando de desligar ao HVAC\n");
+            }
             LastBrokerMsg = Time;
             printf("ESP%i woke up at %lld\n", ESP_Iam, (long long)LastBrokerMsg);
         }
 
         //Obtencao de dados------------------------------------------------
         if ((Time - LastDataMngt) >= data_interval) { // 8 segundos
-            data[0]++;
-            if (data[0] > 35) {
-                data[0] = 25;
+            data[3] += carga_termica;
+            carga_termica = 0;
+            if (DS18B20_read(&DS18B20)) {
+                data[0] = DS18B20;
             }
-            data[1] = 1;
+            if (DHT22_read(&DHT22)) {
+                data[1] = DHT22.temperature;
+                data[2] = DHT22.humidity;
+            }
+            printf("Ocupacao: %d\n", (int)data[3]);
+            vTaskDelay(pdMS_TO_TICKS(100));
+
             LastDataMngt = Time;
             printf("ESP%i read data at %lld\n", ESP_Iam, (long long)LastDataMngt);
         }
@@ -111,10 +137,23 @@ void app_main(void) {
             }
 
             if (!(temp_alvo == last_temp)) {
+                memset(&cmd, 0, sizeof(cmd));
+                cmd.temp_c = temp_alvo;
+                if (!send_ir_command(&cmd)) {
+                    printf("Falha ao enviar comando de temperatura ao HVAC\n");
+                }
                 printf("Set HVAC to: %.1f\n", temp_alvo);
                 last_temp = temp_alvo;
             }
-            if ((broker_msg == 9)) {
+            if ((broker_msg == 9) && HVACon) {
+                memset(&cmd, 0, sizeof(cmd));
+                cmd.power = EMITER_OFF;
+                HVACon = false;
+                broker_msg = 0;
+                if (!send_ir_command(&cmd)) {
+                    printf("Falha ao enviar comando de desligar ao HVAC\n");
+                    HVACon = true;
+                }
                 printf("Turn HVAC off: %.1f\n", temp_alvo);
             }
         }
