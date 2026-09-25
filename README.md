@@ -2,7 +2,7 @@
 
 Sistema embarcado multi-placa em ESP32-C6 (ESP-IDF v6.0) que monitora um ambiente (temperatura, umidade e ocupação aproximada), controla um ar-condicionado por infravermelho imitando o controle remoto original, e coordena esses dados entre várias unidades ESP32 através de Wi-Fi/MQTT e ESP-NOW.
 
-Este documento une o que antes eram dois projetos separados — **sensores/atuadores** e **rede** — agora integrados em um único firmware (`main.c`) que roda em cada placa da instalação.
+Este documento une o que antes eram dois projetos separados — **SensoresAndAtuadores** e **RedeMista** — agora integrados em um único firmware (`main.c`) que roda em cada placa da instalação.
 
 ---
 
