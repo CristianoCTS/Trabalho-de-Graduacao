@@ -1,0 +1,39 @@
+#include <stdio.h>
+#include "esp_mac.h"
+#include "MAC.h"
+
+ESP_t ESP[] = {
+    {15, {0xAC, 0xEB, 0xE6, 0xC1, 0x62, 0xA4}, false},
+    {14, {0x20, 0x6E, 0xF1, 0x15, 0x5F, 0xDC}, false},
+    {12, {0xA0, 0xF2, 0x62, 0x45, 0xE5, 0x2C}, false},
+    {9, {0xE8, 0xF6, 0x0A, 0xFC, 0xBF, 0x50}, false},
+    {8, {0xE8, 0xF6, 0x0A, 0xFC, 0x11, 0xD8}, false},
+    {6, {0xE8, 0xF6, 0x0A, 0xFC, 0xD2, 0xC8}, false}
+};
+
+int ESP_Iam = -1; //ESP não na lista
+const int NUM_ESPS = sizeof(ESP) / sizeof(ESP[0]);
+
+void discover_mac(void) {
+    uint8_t mac[6];
+    esp_read_mac(mac, ESP_MAC_WIFI_STA);
+    printf("Endereço MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
+           mac[0], mac[1], mac[2], mac[3], mac[4], mac[5]);
+}
+
+void mac_init(void) {
+    uint8_t this_mac[6];
+    esp_read_mac(this_mac, ESP_MAC_WIFI_STA);
+
+    if (NUM_ESPS > 10) {
+        printf("Número de ESPs excede o limite de 10\n");
+    }
+
+    for (int i = 0; i < NUM_ESPS; i++) {
+        if (memcmp(this_mac, ESP[i].mac, 6) == 0) {
+            ESP[i].Iam = true;
+            ESP_Iam = i;
+            break;
+        }
+    }
+}
