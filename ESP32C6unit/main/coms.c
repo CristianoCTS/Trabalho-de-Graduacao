@@ -136,7 +136,7 @@ void coms_init(void) {
 void intercom_send(const float *data) {
     if (!mqtt_conected) return;
     char buf[48];
-    snprintf(buf, sizeof(buf), "field1=%.1f&field2=%.1f&field3=%.1f", data[0], data[1], data[2]);
+    snprintf(buf, sizeof(buf), "field1=%.1f&field2=%.1f&field3=%.1f&field4=%.1f&field5=%.1f", data[0], data[1], data[2], data[3], data[4]);
     esp_mqtt_client_publish(mqtt_client, MQTTpub, buf, 0, 1, 0);
 }
 
@@ -181,6 +181,6 @@ void intracom_read(char *out_msg) {
 void wake_up(const float *data) {
     if (!mqtt_conected) return;
     char buf[48];
-    snprintf(buf, sizeof(buf), "field1=%.1f&field2=%.1f&field3=%.1f", data[0], data[1], data[2]);
+    snprintf(buf, sizeof(buf), "field1=%.1f&field2=%.1f&field3=%.1f&field4=%.1f&field5=%.1f", data[0], data[1], data[2], data[3], data[4]);
     esp_mqtt_client_publish(mqtt_client, MQTT.pub[0], buf, 0, 1, 0);
 }
