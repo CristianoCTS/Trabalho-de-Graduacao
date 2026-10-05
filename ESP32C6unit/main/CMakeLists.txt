@@ -1,5 +1,5 @@
 idf_component_register(
-    SRCS "main.c" "coms.c" "MAC.c" "emiter.cpp" "curtain.c" "humidity.c" "temperature.c" "identify.cpp"
+    SRCS "main.c" "coms.c" "MAC.c" "emiter.cpp" "curtain.c" "humidity.c" "temperature.c" "identify.cpp" "controlers.c"
     INCLUDE_DIRS "."
     REQUIRES
         nvs_flash
