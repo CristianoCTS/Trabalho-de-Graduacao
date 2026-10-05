@@ -12,6 +12,7 @@
 #include "emiter.h"
 #include "humidity.h"
 #include "temperature.h"
+#include "controlers.h"
 
 #define broker_interval 15
 #define data_interval 8
@@ -32,10 +33,12 @@ float old_data[] = {25.0f, 25.0f, 0.0f, 0.0f, 0.0f};
 float wakeup_data[] = {25.0f, 25.0f, 0.0f, 0.0f,9.0f};
 float last_temp = 25.0f;
 float temp_alvo = 25.0f;
+float new_temp = 25.0f;
 float broker_msg = 0.0f;
 float DS18B20 = 0.0f;
 dht22_reading_t DHT22 = {0.0f, 0.0f};
 emiter_cmd_t cmd = {0};
+int ControlType = 1;
 
 void app_main(void) {
     //setup das conexões
@@ -53,11 +56,11 @@ void app_main(void) {
         memset(&cmd, 0, sizeof(cmd));
         
         //Comunicacao MQTT-------------------------------------------------
-        if (data[3] == 1 && old_data[3] == 0) { // 0 segundos
+        if (data[3] > 0 && old_data[3] == 0) { // 0 segundos
             if (ESP_Iam == 0) {intracom_send(&synchronize, -1);}
             intercom_send(data);
-            memcpy(old_data, data, sizeof(data));
             memset(&cmd, 0, sizeof(cmd));
+            memcpy(old_data, data, sizeof(data));
             cmd.power = EMITER_ON;
             HVACon = true;
             if (!send_ir_command(&cmd)) {
@@ -66,6 +69,9 @@ void app_main(void) {
             }
             LastBrokerMsg = Time;
             printf("ESP%i woke up at %lld\n", ESP_Iam, (long long)LastBrokerMsg);
+        }
+        else {
+            memcpy(old_data, data, sizeof(data));
         }
 
         //Obtencao de dados------------------------------------------------
@@ -84,6 +90,27 @@ void app_main(void) {
 
             LastDataMngt = Time;
             printf("ESP%i read data at %lld\n", ESP_Iam, (long long)LastDataMngt);
+
+            for (int k = 0; k < 2; k++) memmove(&old_temps[k][1], &old_temps[k][0], (HIST_LEN-1)*sizeof(float));
+            old_temps[HIST_OCUP][0] = data[3]; old_temps[HIST_TEMP][0] = data[0];
+            switch (ControlType) {
+                case 1: //LigaDesliga
+                    new_temp = LigaDesliga(data[3], temp_alvo);
+                    break;
+                case 2: //PI
+                    new_temp = ControlPI(data[3], temp_alvo);
+                    break;
+                case 3: //Adaptativo
+                    new_temp = ControlAdap(data[3], temp_alvo);
+                    break;
+                case 4: //Degrau
+                    new_temp = Step(data[3], temp_alvo);
+                    break;
+                default:
+                    printf("Tipo de controle inválido\n");
+                    new_temp = LigaDesliga(data[3], temp_alvo);
+                    break;
+            }
         }
         //Obtencao de dados------------------------------------------------
 
@@ -99,62 +126,59 @@ void app_main(void) {
         if ((Time - LastBrokerMsg) >= HVAC_interval) { // 17 segundos
             intercom_read(instrucao);
             if (instrucao[0] != '\0') {
-                int tA = atoi((char[]){instrucao[0], instrucao[1], '\0'}); // AB
-                int tB = atoi((char[]){instrucao[3], instrucao[4], '\0'}); // DE
-                int tC = atoi((char[]){instrucao[6], instrucao[7], '\0'}); // GH
-                int msgA = instrucao[2] - '0'; // C
-                int msgB = instrucao[5] - '0'; // F
-                int msgC = instrucao[8] - '0'; // I
-                command = instrucao[9] - '0';  // J
+                int temperature = atoi((char[]){instrucao[0], instrucao[1], '\0'}); // AB
+                int Controler = instrucao[2] - '0'; // C
+                int msgA = instrucao[3] - '0'; // D
+                int msgB = instrucao[4] - '0'; // E
+                command = instrucao[5] - '0';  // F
                 switch (command) {
                     case 1:
                         printf("Intercom: Request in %lld\n", (long long)LastBrokerMsg);
-                        printf("Temps: ESP0: %d, ESP1: %d, ESP2: %d\n", tA, tB, tC);
-                        printf("Msgs:  ESP0: %d, ESP1: %d, ESP2: %d\n", msgA, msgB, msgC);
+                        printf("Temperatura Alvo: %d\n", temperature);
+                        printf("Msgs:  ESP0: %d, ESP1: %d\n", msgA, msgB);
                         break;
                     default:
-                        printf("Temps: ESP0: %d, ESP1: %d, ESP2: %d\n", tA, tB, tC);
-                        printf("Msgs:  ESP0: %d, ESP1: %d, ESP2: %d\n", msgA, msgB, msgC);
+                        printf("Temperatura Alvo: %d\n", temperature);
+                        printf("Msgs:  ESP0: %d, ESP1: %d\n", msgA, msgB);
                         break;
                 }
                 switch (ESP_Iam)
                 {
                 case 0:
-                    temp_alvo = tA;
+                    temp_alvo = temperature;
                     broker_msg = msgA;
+                    ControlType = Controler;
                     break;
                 case 1:
-                    temp_alvo = tB;
+                    temp_alvo = temperature;
                     broker_msg = msgB;
-                    break;
-                case 2:    
-                    temp_alvo = tC;
-                    broker_msg = msgC;
+                    ControlType = Controler;
                     break;
                 default:
                     break;
                 }
             }
 
-            if (!(temp_alvo == last_temp)) {
+            if (!(new_temp == last_temp)) {
                 memset(&cmd, 0, sizeof(cmd));
-                cmd.temp_c = temp_alvo;
+                cmd.temp_c = new_temp;
                 if (!send_ir_command(&cmd)) {
                     printf("Falha ao enviar comando de temperatura ao HVAC\n");
                 }
-                printf("Set HVAC to: %.1f\n", temp_alvo);
-                last_temp = temp_alvo;
+                printf("Set HVAC to: %.1f\n", new_temp);
+                last_temp = new_temp;
             }
+
             if ((broker_msg == 9) && HVACon) {
                 memset(&cmd, 0, sizeof(cmd));
                 cmd.power = EMITER_OFF;
-                HVACon = false;
-                broker_msg = 0;
                 if (!send_ir_command(&cmd)) {
                     printf("Falha ao enviar comando de desligar ao HVAC\n");
                     HVACon = true;
+                } else {
+                    printf("Turn HVAC off: %.1f\n", temp_alvo);
+                    HVACon = false;
                 }
-                printf("Turn HVAC off: %.1f\n", temp_alvo);
             }
         }
         //Comunicacao MQTT-------------------------------------------------
