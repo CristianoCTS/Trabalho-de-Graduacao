@@ -124,6 +124,7 @@ void app_main(void) {
         }
 
         if ((Time - LastBrokerMsg) >= HVAC_interval) { // 17 segundos
+            intercom_read_parameters();
             intercom_read(instrucao);
             if (instrucao[0] != '\0') {
                 int temperature = atoi((char[]){instrucao[0], instrucao[1], '\0'}); // AB

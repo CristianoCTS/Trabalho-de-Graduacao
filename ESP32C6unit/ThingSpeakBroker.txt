@@ -1,0 +1,84 @@
+%======Aqui segue o código com os dados sensiveis omitidos======
+
+% ==== Lê dados e timestamp de cada ESP ====
+dados = NaN(numESPs, 5);
+tsESP = NaN(1, numESPs);
+
+for i = 1:numESPs
+    try
+        [d, t] = thingSpeakRead(espChIds(i), ...
+            'Fields', 1:5, 'NumPoints', 1, 'ReadKey', espReadKeys{i});
+        dados(i,:) = d;
+        tsESP(i)   = posixtime(t);
+    catch
+        fprintf('Falha ao ler canal %d\n', espChIds(i));
+    end
+end
+ctrl = thingSpeakRead(espChIds(3), 'Fields', 1:3,'NumPoints', 1, 'ReadKey', espReadKeys{3});
+ControlType = ctrl(1);
+SetPoint = ctrl(2);
+GastoEnergetico = ctrl(3);
+Ocupacao = max(dados(:,4), [], 'omitnan');
+
+tMaisRecente = max(tsESP);
+TimeStamp = mod(round(tMaisRecente), 1000);
+LastTimeStamp = GetLastTimeStamp(writeChId, readKeyBrk);
+% ==== Garante 15 segundos desde o último write no broker ====
+try
+    [~, lastTime] = thingSpeakRead(writeChId, 'Field', 1, 'NumPoints', 1, 'ReadKey', readKeyBrk);
+catch
+    lastTime = [];
+end
+if isempty(lastTime)
+    elapsed = minInterval;
+else
+    if isempty(lastTime.TimeZone)
+        lastTime.TimeZone = 'UTC';
+    end
+    elapsed = seconds(datetime('now','TimeZone','UTC') - lastTime);
+end
+if elapsed < minInterval
+    pause(minInterval - elapsed);
+end
+
+% ==== Re-checa (assinatura não mudou, pois não depende de "now") ====
+LastTimeStamp = GetLastTimeStamp(writeChId, readKeyBrk);
+if TimeStamp == LastTimeStamp
+    return;
+else
+    comand = BrokerControl(ControlType, SetPoint, Ocupacao)
+    codigo = comand * 1000 + TimeStamp;
+    parametros = '020026023030020026100015030300027025020120100030020003004000';
+    %thingSpeakWrite(writeChId, 'Field', 1, 'Value', codigo, 'WriteKey', writeKey);
+    %thingSpeakWrite(writeChId, 'Field', 2, 'Value', parametros, 'WriteKey', writeKey);
+    thingSpeakWrite(writeChId, {codigo, parametros}, 'Fields', [1 2], 'WriteKey', writeKey);
+end
+
+%==================================Funcoes================================================%
+
+function assinatura = GetLastTimeStamp(writeChId, readKeyBrk)
+    try
+        valor = thingSpeakRead(writeChId, 'Field', 1, 'NumPoints', 1, 'ReadKey', readKeyBrk);
+        if isnan(valor)
+            assinatura = -1;
+        else
+            assinatura = mod(round(valor), 1000);
+        end
+    catch
+        assinatura = -1;
+    end
+end
+
+function comando = BrokerControl(ControlType, SetPoint, Ocupacao)
+    if ControlType == 3 && Ocupacao <= 0
+        msg1 = 9;
+        msg2 = 9;
+        ESPactive = 0;
+    else
+        msg1 = 1;
+        msg2 = 1;
+        ESPactive = 1;
+    end
+ 
+    comando = (SetPoint * 1e4) + (ControlType * 1e3) + (msg1 * 1e2) + (msg2 * 1e1) + ESPactive;
+end

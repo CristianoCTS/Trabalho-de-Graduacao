@@ -9,27 +9,29 @@
 #include "esp_event.h"
 #include "esp_timer.h"
 #include "controlers.h"
+#include "coms.h"
 
-#define SET_MIN 20.0f
-#define SET_MAX 26.0f
-#define SET_PADRAO 23.0f
-#define LD_BANDA 0.3f
-#define LD_SET_FRIO 20.0f
-#define LD_SET_OCIOSO 26.0f
-#define PI_KP 1.0f
-#define PI_TI 15.0f
+extern float parameters[20];
+#define SET_MIN (parameters[0])
+#define SET_MAX (parameters[1])
+#define SET_PADRAO (parameters[2])
+#define LD_BANDA (parameters[3])
+#define LD_SET_FRIO (parameters[4])
+#define LD_SET_OCIOSO (parameters[5])
+#define PI_KP (parameters[6])
+#define PI_TI (parameters[7])
 #define PI_KI (PI_KP / PI_TI)
-#define PI_JANELA 30
-#define PI_IMAX 3.0f
-#define AD_TREF_VAZIA 27.0f
-#define AD_KFF0 0.25f
-#define AD_GAMMA 0.002f
-#define AD_JAN_AD 120
-#define AD_KFF_MAX 1.0f
-#define CORR_ACIMA 0.3f
-#define CORR_ABAIXO -0.2f
-#define STEP_LIGADO_S (3 * 3600)
-#define STEP_CICLO_S (4 * 3600)
+#define PI_JANELA ((int)parameters[8])
+#define PI_IMAX (parameters[9])
+#define AD_TREF_VAZIA (parameters[10])
+#define AD_KFF0 (parameters[11])
+#define AD_GAMMA (parameters[12])
+#define AD_JAN_AD ((int)parameters[13])
+#define AD_KFF_MAX (parameters[14])
+#define CORR_ACIMA (parameters[15])
+#define CORR_ABAIXO (parameters[16])
+#define STEP_LIGADO_S ((int64_t)parameters[17])
+#define STEP_CICLO_S ((int64_t)parameters[18])
 
 float old_temps[2][HIST_LEN] = { [0 ... 1] = { [0 ... HIST_LEN - 1] = NAN } };
 static float ultimo_setp = NAN;

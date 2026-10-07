@@ -16,6 +16,10 @@ static char mqtt_received[20] = "";
 static uint8_t *slaves[10];
 static char msn[20] = "";
 static char received_msg[20] = "";
+float parameters[20] = { 20, 26, 23, 0.3f, 20, 26, 1.0f, 15, 30, 3.0f, 27, 0.25f, 0.002f, 120, 1.0f, 0.3f, -0.2f, 10800, 14400, 0 };
+static char mqtt_parameters[64] = "";
+static char last_parameters[64] = "";
+
 
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
     if (event_base == WIFI_EVENT && event_id == WIFI_EVENT_STA_START) {
@@ -40,10 +44,16 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             mqtt_conected = true;
             printf("intercom: MQTT conectado\n");
             esp_mqtt_client_subscribe(mqtt_client, MQTTsub, 0);
+            esp_mqtt_client_subscribe(mqtt_client, MQTTpar, 0);
             break;
         case MQTT_EVENT_DATA:
-            snprintf(mqtt_received, sizeof(mqtt_received), "%.*s", event->data_len, event->data);
-            printf("intercom: Recebido: %s\n", mqtt_received);
+            if (event->topic_len == (int)strlen(MQTTpar) && strncmp(event->topic, MQTTpar, event->topic_len) == 0) {
+                snprintf(mqtt_parameters, sizeof(mqtt_parameters), "%.*s", event->data_len, event->data);
+                printf("intercom: Parametros recebidos: %s\n", mqtt_parameters);
+            } else {
+                snprintf(mqtt_received, sizeof(mqtt_received), "%.*s", event->data_len, event->data);
+                printf("intercom: Recebido: %s\n", mqtt_received);
+            }
             break;
         case MQTT_EVENT_DISCONNECTED:
             mqtt_conected = false;
@@ -144,6 +154,30 @@ void intercom_read(char *out) {
     strncpy(out, mqtt_received, sizeof(mqtt_received) - 1);
     out[sizeof(mqtt_received) - 1] = '\0';
     memset(mqtt_received, 0, sizeof(mqtt_received));
+}
+
+void intercom_read_parameters(void) {
+    static const float mult[20] = { 1, 1, 1, 0.01f, 1, 1, 0.01f, 1, 1, 0.01f, 1, 0.01f, 0.0001f, 1, 0.01f, 0.01f, -0.01f, 3600, 3600, 1 };
+    int len = strlen(mqtt_parameters);
+    if (len == 0 || len > 60) return;
+    if (strcmp(mqtt_parameters, last_parameters) == 0) return;
+    strcpy(last_parameters, mqtt_parameters);
+
+    char par[61];
+    memset(par, '0', 60 - len);
+    memcpy(par + 60 - len, mqtt_parameters, len + 1);
+
+    for (int i = 0; i < 60; i++) {
+        if (par[i] < '0' || par[i] > '9') {
+            printf("coms: parametros invalidos, ignorando\n");
+            return;
+        }
+    }
+    for (int i = 0; i < 20; i++) {
+        int raw = (par[3*i] - '0') * 100 + (par[3*i+1] - '0') * 10 + (par[3*i+2] - '0');
+        parameters[i] = raw * mult[i];
+    }
+    printf("coms: parametros atualizados\n");
 }
 
 
