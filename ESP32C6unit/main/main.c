@@ -46,7 +46,7 @@ void app_main(void) {
     emiter_init();
     DHT22_init();
     DS18B20_init();
-    coms_init();
+    coms_init(true);
     Time = esp_timer_get_time()/1000000;
     LastBrokerMsg = 0;
     LastDataMngt = 0;

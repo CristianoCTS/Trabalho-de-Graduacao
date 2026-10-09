@@ -75,72 +75,123 @@ static void receive_msg(const esp_now_recv_info_t *info, const uint8_t *data, in
     }
 }
 
-void coms_init(void) {
+void coms_init(bool all) {
 
-    nvs_flash_init();
-    mac_init();
-    credentials_init();
+    if (all) {
+        nvs_flash_init();
+        mac_init();
+        credentials_init();
 
-    // Configura Wi-Fi----------------------------------------------------------------
-    esp_netif_init();
-    esp_event_loop_create_default();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    esp_netif_t *netif = esp_netif_create_default_wifi_sta();
-    esp_wifi_init(&cfg);
-    esp_wifi_set_mode(WIFI_MODE_STA);
-    // Configura Wi-Fi----------------------------------------------------------------
+        // Configura Wi-Fi----------------------------------------------------------------
+        esp_netif_init();
+        esp_event_loop_create_default();
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        esp_netif_t *netif = esp_netif_create_default_wifi_sta();
+        esp_wifi_init(&cfg);
+        esp_wifi_set_mode(WIFI_MODE_STA);
+        // Configura Wi-Fi----------------------------------------------------------------
 
-    //Configura o MQTT----------------------------------------------------------------
-    esp_netif_set_hostname(netif, HOSTNAME);
-    esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL);
-    esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL);
-    wifi_config_t wifi_config = {
-        .sta = {
-            .ssid = SSID,
-            .password = SSIDp,
-            .threshold.authmode = WIFI_AUTH_OPEN,
-        },
-    };
-    esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
-    esp_wifi_start();
-    while (!wifi_conected) {
-        printf("Esperando conexão wifi\n");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-    esp_mqtt_client_config_t mqtt_config = {
-        .broker.address.uri  = MQTT_BROKER,
-        .broker.address.port = MQTT_port,
-        .credentials.client_id = MQTTc,
-        .credentials.username = MQTTu,
-        .credentials.authentication.password = MQTTp,
-    };
-    mqtt_client = esp_mqtt_client_init(&mqtt_config);
-    esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
-    esp_mqtt_client_start(mqtt_client);
-    while (!mqtt_conected) {
-        printf("Esperando conexão MQTT\n");
-        vTaskDelay(pdMS_TO_TICKS(1000));
-    }
-    //Configura o MQTT----------------------------------------------------------------
-
-    //Configura o ESPNOW--------------------------------------------------------------
-    int j = 0;
-    for (int i = 0; i < NUM_ESPS; i++) { // Monta lista de slaves
-        if (!ESP[i].Iam) {
-            slaves[j++] = ESP[i].mac;
+        //Configura o MQTT----------------------------------------------------------------
+        esp_netif_set_hostname(netif, HOSTNAME);
+        esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL);
+        esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL);
+        wifi_config_t wifi_config = {
+            .sta = {
+                .ssid = SSID,
+                .password = SSIDp,
+                .threshold.authmode = WIFI_AUTH_OPEN,
+            },
+        };
+        esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+        esp_wifi_start();
+        esp_wifi_set_ps(WIFI_PS_NONE);
+        while (!wifi_conected) {
+            printf("Esperando conexão wifi\n");
+            vTaskDelay(pdMS_TO_TICKS(1000));
         }
+        esp_mqtt_client_config_t mqtt_config = {
+            .broker.address.uri  = MQTT_BROKER,
+            .broker.address.port = MQTT_port,
+            .credentials.client_id = MQTTc,
+            .credentials.username = MQTTu,
+            .credentials.authentication.password = MQTTp,
+        };
+        mqtt_client = esp_mqtt_client_init(&mqtt_config);
+        esp_mqtt_client_register_event(mqtt_client, ESP_EVENT_ANY_ID, mqtt_event_handler, NULL);
+        esp_mqtt_client_start(mqtt_client);
+        while (!mqtt_conected) {
+            printf("Esperando conexão MQTT\n");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+        //Configura o MQTT----------------------------------------------------------------
+
+        //Configura o ESPNOW--------------------------------------------------------------
+        int j = 0;
+        for (int i = 0; i < NUM_ESPS; i++) { // Monta lista de slaves
+            if (!ESP[i].Iam) {
+                slaves[j++] = ESP[i].mac;
+            }
+        }
+        esp_now_init(); // Inicia ESP-NOW
+        esp_now_register_recv_cb(receive_msg);
+        
+        for (int i = 0; i < (NUM_ESPS - 1); i++) { // Registra peers
+            esp_now_peer_info_t slaveInfo = {};
+            memcpy(slaveInfo.peer_addr, slaves[i], 6);
+            slaveInfo.channel = 0;
+            slaveInfo.encrypt = false;
+            esp_now_add_peer(&slaveInfo);
+        }
+        //Configura o ESPNOW--------------------------------------------------------------
+    } else{
+        nvs_flash_init();
+        mac_init();
+        credentials_init();
+
+        // Configura Wi-Fi----------------------------------------------------------------
+        esp_netif_init();
+        esp_event_loop_create_default();
+        wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+        esp_netif_create_default_wifi_sta();
+        esp_wifi_init(&cfg);
+        esp_wifi_set_mode(WIFI_MODE_STA);
+        esp_event_handler_register(WIFI_EVENT, ESP_EVENT_ANY_ID, &event_handler, NULL);
+        esp_event_handler_register(IP_EVENT, IP_EVENT_STA_GOT_IP, &event_handler, NULL);
+        wifi_config_t wifi_config = {
+            .sta = {
+                .ssid = SSID,
+                .password = SSIDp,
+                .threshold.authmode = WIFI_AUTH_OPEN,
+            },
+        };
+        esp_wifi_set_config(WIFI_IF_STA, &wifi_config);
+        esp_wifi_start();
+        esp_wifi_set_ps(WIFI_PS_NONE);
+        while (!wifi_conected) {
+            printf("Esperando conexão wifi\n");
+            vTaskDelay(pdMS_TO_TICKS(1000));
+        }
+        // Configura Wi-Fi----------------------------------------------------------------
+
+        //Configura o ESPNOW--------------------------------------------------------------
+        int j = 0;
+        for (int i = 0; i < NUM_ESPS; i++) { // Monta lista de slaves
+            if (!ESP[i].Iam) {
+                slaves[j++] = ESP[i].mac;
+            }
+        }
+        esp_now_init(); // Inicia ESP-NOW
+        esp_now_register_recv_cb(receive_msg);
+        
+        for (int i = 0; i < (NUM_ESPS - 1); i++) { // Registra peers
+            esp_now_peer_info_t slaveInfo = {};
+            memcpy(slaveInfo.peer_addr, slaves[i], 6);
+            slaveInfo.channel = 0;
+            slaveInfo.encrypt = false;
+            esp_now_add_peer(&slaveInfo);
+        }
+        //Configura o ESPNOW--------------------------------------------------------------
     }
-    esp_now_init(); // Inicia ESP-NOW
-    esp_now_register_recv_cb(receive_msg);
-    
-    for (int i = 0; i < (NUM_ESPS - 1); i++) { // Registra peers
-        esp_now_peer_info_t slaveInfo = {};
-        memcpy(slaveInfo.peer_addr, slaves[i], 6);
-        slaveInfo.channel = 0;
-        slaveInfo.encrypt = false;
-        esp_now_add_peer(&slaveInfo);
-    }
-    //Configura o ESPNOW--------------------------------------------------------------
 }
 
 void intercom_send(const float *data) {

@@ -1,9 +1,12 @@
 #include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
 #include "led_strip.h"
 #include "curtain.h"
+#include "coms.h"
 
 #define BTN1_GPIO GPIO_NUM_7
 #define BTN2_GPIO GPIO_NUM_6
@@ -12,7 +15,8 @@
 #define poll 20
 #define debounce 50
 
-int16_t carga_termica = 0;
+float carga_termica = 0.0f;
+char CG_espnow[20] = "";
 
 static led_strip_handle_t strip;
 
@@ -49,27 +53,30 @@ static void curtain_task(void *params)
     while (true) {
         btn_combo_t atual = BTN_read();
 
+        intracom_read(CG_espnow);
+        carga_termica = atof(CG_espnow);
         if (anterior == BTN_N && atual != BTN_N) {
             vTaskDelay(pdMS_TO_TICKS(debounce));
             atual = BTN_read();
             switch (atual) {
                 case BTN_1:
                     printf("Botao 7\n");
-                    carga_termica = 1;
+                    carga_termica += 1.0f;
                     led_blink(255, 0, 0);
                     break;
                 case BTN_2:
                     printf("Botao 6\n");
-                    carga_termica = -1;
+                    carga_termica -= 1.0f;
                     led_blink(0, 0, 255);
                     break;
                 case BTN_A:
                     printf("Botoes 7+6\n");
-                    carga_termica = 0;
+                    carga_termica -= 900.0f;
                     led_blink(128, 0, 128);
                     break;
                 default:
-                    carga_termica = 0;
+                    carga_termica += 0.0f;
+                    memset(CG_espnow, 0, sizeof(CG_espnow));
                     break;
             }
         }

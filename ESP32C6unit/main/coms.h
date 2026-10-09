@@ -1,9 +1,10 @@
 #pragma once
 #include <stdint.h>
+#include <stdbool.h>
 
 extern float parameters[20];
 
-void coms_init(void);
+void coms_init(bool all);
 void wake_up(const float *data);
 void intercom_send(const float *data);
 void intercom_read(char *out);
