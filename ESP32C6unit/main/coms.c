@@ -194,17 +194,20 @@ void coms_init(bool all) {
     }
 }
 
-void intercom_send(const float *data) {
-    if (!mqtt_conected) return;
+bool intercom_send(const float *data) {
+    if (!mqtt_conected) return false;
     char buf[128];
     snprintf(buf, sizeof(buf), "field1=%.1f&field2=%.1f&field3=%.1f&field4=%.1f&field5=%.1f", data[0], data[1], data[2], data[3], data[4]);
     esp_mqtt_client_publish(mqtt_client, MQTTpub, buf, 0, 1, 0);
+    return true;
 }
 
-void intercom_read(char *out) {
+bool intercom_read(char *out) {
+    bool has_msg = (mqtt_received[0] != '\0');
     strncpy(out, mqtt_received, sizeof(mqtt_received) - 1);
     out[sizeof(mqtt_received) - 1] = '\0';
     memset(mqtt_received, 0, sizeof(mqtt_received));
+    return has_msg;
 }
 
 void intercom_read_parameters(void) {
@@ -232,9 +235,10 @@ void intercom_read_parameters(void) {
 }
 
 
-void intracom_send(const float *data, int slave_index) {
+bool intracom_send(const float *data, int slave_index) {
     char message[16];
     sprintf(message, "%f", *data);
+    bool ok = true;
     if (slave_index == -1) {
         printf("Sent to all\n");
         for (int i = 0; i < (NUM_ESPS - 1); i++) {
@@ -242,7 +246,12 @@ void intracom_send(const float *data, int slave_index) {
             //     slaves[i][0], slaves[i][1], slaves[i][2],
             //     slaves[i][3], slaves[i][4], slaves[i][5]);
             strcpy(msn, message);
-            esp_now_send(slaves[i], (uint8_t *)msn, strlen(msn));
+            if (esp_now_send(slaves[i], (uint8_t *)msn, strlen(msn)) != ESP_OK) {
+                printf("Failed to reach to MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
+                slaves[i][0], slaves[i][1], slaves[i][2],
+                slaves[i][3], slaves[i][4], slaves[i][5]);
+                ok = false;
+            }
         }
     } else if (slave_index < (NUM_ESPS - 1)) {
         printf("Sent to one\n");
@@ -250,17 +259,26 @@ void intracom_send(const float *data, int slave_index) {
         //     slaves[slave_index][0], slaves[slave_index][1], slaves[slave_index][2],
         //     slaves[slave_index][3], slaves[slave_index][4], slaves[slave_index][5]);
         strcpy(msn, message);
-        esp_now_send(slaves[slave_index], (uint8_t *)msn, strlen(msn));
+        if (esp_now_send(slaves[slave_index], (uint8_t *)msn, strlen(msn)) != ESP_OK) {
+            printf("Failed to reach to MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
+            slaves[slave_index][0], slaves[slave_index][1], slaves[slave_index][2],
+            slaves[slave_index][3], slaves[slave_index][4], slaves[slave_index][5]);
+            ok = false;
+        }
     } else {
         printf("slave inválido: %d\n", slave_index);
+        ok = false;
     }
     vTaskDelay(pdMS_TO_TICKS(10));
+    return ok;
 }
 
-void intracom_read(char *out_msg) {
+bool intracom_read(char *out_msg) {
+    bool has_msg = (received_msg[0] != '\0');
     strncpy(out_msg, received_msg, sizeof(received_msg) - 1);
     out_msg[sizeof(received_msg) - 1] = '\0';
     memset(received_msg, 0, sizeof(received_msg));
+    return has_msg;
 }
 
 void wake_up(const float *data) {

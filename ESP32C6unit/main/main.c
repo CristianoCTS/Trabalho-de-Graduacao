@@ -9,6 +9,7 @@
 #include "MQTT.h"
 #include "esp_timer.h"
 #include "curtain.h"
+#include "PIRcurtain.h"
 #include "emiter.h"
 #include "humidity.h"
 #include "temperature.h"
@@ -77,6 +78,7 @@ void app_main(void) {
         //Obtencao de dados------------------------------------------------
         if ((Time - LastDataMngt) >= data_interval) { // 8 segundos
             data[3] += carga_termica;
+            if (data[3] < 0) {data[3] = 0;}
             carga_termica = 0;
             if (DS18B20_read(&DS18B20)) {
                 data[0] = DS18B20;

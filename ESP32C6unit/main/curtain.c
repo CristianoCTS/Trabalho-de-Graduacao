@@ -6,6 +6,7 @@
 #include "driver/gpio.h"
 #include "led_strip.h"
 #include "curtain.h"
+#include "PIRcurtain.h"
 #include "coms.h"
 
 #define BTN1_GPIO GPIO_NUM_7
@@ -17,8 +18,6 @@
 
 float carga_termica = 0.0f;
 char CG_espnow[20] = "";
-
-static led_strip_handle_t strip;
 
 typedef enum {
     BTN_N = 0,
@@ -38,14 +37,6 @@ static btn_combo_t BTN_read(void)
     return BTN_N;
 }
 
-static void led_blink(uint8_t r, uint8_t g, uint8_t b)
-{
-    led_strip_set_pixel(strip, 0, r, g, b);
-    led_strip_refresh(strip);
-    vTaskDelay(pdMS_TO_TICKS(blink_ms));
-    led_strip_clear(strip);
-}
-
 static void curtain_task(void *params)
 {
     btn_combo_t anterior = BTN_N;
@@ -53,8 +44,7 @@ static void curtain_task(void *params)
     while (true) {
         btn_combo_t atual = BTN_read();
 
-        intracom_read(CG_espnow);
-        carga_termica = atof(CG_espnow);
+        if (intracom_read(CG_espnow)) {carga_termica = atof(CG_espnow);}
         if (anterior == BTN_N && atual != BTN_N) {
             vTaskDelay(pdMS_TO_TICKS(debounce));
             atual = BTN_read();
@@ -76,7 +66,6 @@ static void curtain_task(void *params)
                     break;
                 default:
                     carga_termica += 0.0f;
-                    memset(CG_espnow, 0, sizeof(CG_espnow));
                     break;
             }
         }
@@ -96,15 +85,7 @@ void curtain_init(void)
     };
     ESP_ERROR_CHECK(gpio_config(&cfg));
 
-    led_strip_config_t led_cfg = {
-        .strip_gpio_num = led_gpio,
-        .max_leds = 1,
-    };
-    led_strip_rmt_config_t rmt_cfg = {
-        .resolution_hz = 10000000,
-    };
-    led_strip_new_rmt_device(&led_cfg, &rmt_cfg, &strip);
-    led_strip_clear(strip);
+    led_init();
 
     if (xTaskCreate(curtain_task, "curtain", 6144, NULL, 1, NULL) != pdPASS) {
         printf("Falha ao criar a cortina\n");

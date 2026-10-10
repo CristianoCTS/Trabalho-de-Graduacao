@@ -12,8 +12,8 @@
 #include "PIRcurtain.h"
 
 
-#define sensorA GPIO_NUM_0
-#define sensorB GPIO_NUM_1
+#define sensorA GPIO_NUM_4
+#define sensorB GPIO_NUM_5
 #define aquecimento 60
 #define janela 1500
 #define bloqueio 1000
@@ -33,7 +33,7 @@ bool estado_led = false;
 float direcao = 0.0f;
 static led_strip_handle_t led = NULL;
 
-static void led_set(bool ligado, int r, int g, int b)
+void led_set(bool ligado, int r, int g, int b)
 {
     if (led == NULL) {
         return;
@@ -46,14 +46,14 @@ static void led_set(bool ligado, int r, int g, int b)
     }
 }
 
-static void led_blink(int r, int g, int b)
+void led_blink(int r, int g, int b)
 {
     led_set(true, r, g, b);
     vTaskDelay(pdMS_TO_TICKS(blink));
     led_set(false, 0, 0, 0);
 }
 
-static void led_init(void)
+void led_init(void)
 {
     led_strip_config_t strip_cfg = {
         .strip_gpio_num = LED_GPIO,
@@ -138,7 +138,7 @@ static void monitora_psg(void *arg)
     }
 }
 
-void curtain_init(void)
+void PIRcurtain_init(void)
 {
     led_init();
     coms_init(false);
