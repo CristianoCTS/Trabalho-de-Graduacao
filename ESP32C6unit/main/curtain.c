@@ -17,6 +17,7 @@
 #define debounce 50
 
 float carga_termica = 0.0f;
+float holder = 0.0f;
 char CG_espnow[20] = "";
 
 typedef enum {
@@ -44,7 +45,8 @@ static void curtain_task(void *params)
     while (true) {
         btn_combo_t atual = BTN_read();
 
-        if (intracom_read(CG_espnow)) {carga_termica = atof(CG_espnow);}
+        if (intracom_read(CG_espnow)) {holder = atof(CG_espnow);}
+        if (holder <= 100.0f) {carga_termica += holder;} else {holder = 0.0f;}
         if (anterior == BTN_N && atual != BTN_N) {
             vTaskDelay(pdMS_TO_TICKS(debounce));
             atual = BTN_read();

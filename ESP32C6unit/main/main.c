@@ -18,7 +18,7 @@
 #define broker_interval 15
 #define data_interval 8
 #define HVAC_interval 17
-float synchronize = 100.0f;
+float synchronize = 101.0f;
 
 bool blacked_out = false;
 bool HVACon = false;
@@ -189,7 +189,7 @@ void app_main(void) {
         //Comunicacao ESPNOW-----------------------------------------------
         intracom_read(received_msg);
         float msg = atof(received_msg);
-        if (msg == 100.0f) {
+        if (msg == 101.0f) {
             LastBrokerMsg = Time;
             printf("Intracom: synchronized in %lld\n", (long long)LastBrokerMsg);
         }
