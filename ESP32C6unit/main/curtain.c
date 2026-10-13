@@ -45,8 +45,15 @@ static void curtain_task(void *params)
     while (true) {
         btn_combo_t atual = BTN_read();
 
-        if (intracom_read(CG_espnow)) {holder = atof(CG_espnow);}
-        if (holder <= 100.0f) {carga_termica += holder;} else {holder = 0.0f;}
+        if (intracom_read(CG_espnow)) {
+            holder = atof(CG_espnow); 
+            printf("Intracom: carga termica recebida: %.1f\n", holder);}
+        if (holder <= 50.0f) {
+            carga_termica += holder;
+            holder = 0.0f;
+        } else {
+            holder = 0.0f;
+        }
         if (anterior == BTN_N && atual != BTN_N) {
             vTaskDelay(pdMS_TO_TICKS(debounce));
             atual = BTN_read();
