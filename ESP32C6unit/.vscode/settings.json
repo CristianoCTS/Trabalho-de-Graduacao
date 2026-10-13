@@ -16,5 +16,5 @@
     "--compile-commands-dir=c:\\TG\\ESP32C6unit\\build"
   ],
   "idf.flashType": "UART",
-  "idf.port": "COM15"
+  "idf.port": "COM12"
 }
