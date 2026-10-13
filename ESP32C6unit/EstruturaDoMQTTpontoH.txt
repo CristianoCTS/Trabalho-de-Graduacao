@@ -1,0 +1,45 @@
+#include <stdio.h>
+#include "MAC.h" 
+
+
+*Aqui ficam os defines
+
+
+typedef struct {
+    char HOSTNAME[ESPS_NUM][32];
+    char u[ESPS_NUM][32];
+    char p[ESPS_NUM][32];
+    char c[ESPS_NUM][32];
+    char id[ESPS_NUM][16];
+    char pub[ESPS_NUM][64];
+    char sub[ESPS_NUM][64];
+    char par[ESPS_NUM][64];
+} MQTT_t;
+ 
+static const MQTT_t MQTT = {
+*Aqui ficam os dados
+};
+ 
+static char HOSTNAME[32];
+static char MQTTu[32];
+static char MQTTp[32];
+static char MQTTc[32];
+static char MQTTid[16];
+static char MQTTpub[64];
+static char MQTTsub[64];
+static char MQTTpar[64];
+ 
+static inline void credentials_init(void) {
+    if (ESP_Iam == -1) {
+        printf("ESP não registrada\n");
+        return;
+    }
+    snprintf(HOSTNAME, sizeof(HOSTNAME), "%s", MQTT.HOSTNAME[ESP_Iam]);
+    snprintf(MQTTu, sizeof(MQTTu), "%s", MQTT.u[ESP_Iam]);
+    snprintf(MQTTp, sizeof(MQTTp), "%s", MQTT.p[ESP_Iam]);
+    snprintf(MQTTc, sizeof(MQTTc), "%s", MQTT.c[ESP_Iam]);
+    snprintf(MQTTid, sizeof(MQTTid), "%s", MQTT.id[ESP_Iam]);
+    snprintf(MQTTpub, sizeof(MQTTpub), "%s", MQTT.pub[ESP_Iam]);
+    snprintf(MQTTsub, sizeof(MQTTsub), "%s", MQTT.sub[ESP_Iam]);
+    snprintf(MQTTpar, sizeof(MQTTpar), "%s", MQTT.par[ESP_Iam]);
+}

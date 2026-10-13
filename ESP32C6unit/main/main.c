@@ -47,10 +47,12 @@ void app_main(void) {
     emiter_init();
     DHT22_init();
     DS18B20_init();
+    led_set(true, 120, 20, 0);
     coms_init(true);
     Time = esp_timer_get_time()/1000000;
     LastBrokerMsg = 0;
     LastDataMngt = 0;
+    led_set(false, 0, 0, 0);
     
     while (1) {
         Time = esp_timer_get_time()/1000000;
@@ -70,6 +72,7 @@ void app_main(void) {
             }
             LastBrokerMsg = Time;
             printf("ESP%i woke up at %lld\n", ESP_Iam, (long long)LastBrokerMsg);
+            led_blink(0, 150, 20);
         }
         else {
             memcpy(old_data, data, sizeof(data));
@@ -122,6 +125,7 @@ void app_main(void) {
                 command = 0;
                 LastBrokerMsg = Time;
                 printf("ESP%i sent broker a message at %lld\n", ESP_Iam, (long long)LastBrokerMsg);
+                led_blink(0, 150, 20);
             }
         }
 
@@ -160,6 +164,7 @@ void app_main(void) {
                 default:
                     break;
                 }
+                led_blink(255, 0, 255);
             }
 
             if (!(new_temp == last_temp)) {
@@ -167,9 +172,11 @@ void app_main(void) {
                 cmd.temp_c = new_temp;
                 if (!send_ir_command(&cmd)) {
                     printf("Falha ao enviar comando de temperatura ao HVAC\n");
+                } else {
+                    printf("Set HVAC to: %.1f\n", new_temp);
+                    last_temp = new_temp;
+                    led_blink(255, 255, 255);
                 }
-                printf("Set HVAC to: %.1f\n", new_temp);
-                last_temp = new_temp;
             }
 
             if ((broker_msg == 9) && HVACon) {
@@ -181,6 +188,7 @@ void app_main(void) {
                 } else {
                     printf("Turn HVAC off: %.1f\n", temp_alvo);
                     HVACon = false;
+                    led_blink(255, 255, 255);
                 }
             }
         }
