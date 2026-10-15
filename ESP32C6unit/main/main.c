@@ -18,7 +18,6 @@
 #define broker_interval 15
 #define data_interval 8
 #define HVAC_interval 17
-float synchronize = 101.0f;
 
 bool blacked_out = false;
 bool HVACon = false;
@@ -60,7 +59,6 @@ void app_main(void) {
         
         //Comunicacao MQTT-------------------------------------------------
         if (data[3] > 0 && old_data[3] == 0) { // 0 segundos
-            if (ESP_Iam == 0) {intracom_send(&synchronize, -1);}
             intercom_send(data);
             memset(&cmd, 0, sizeof(cmd));
             memcpy(old_data, data, sizeof(data));
@@ -195,16 +193,6 @@ void app_main(void) {
             }
         }
         //Comunicacao MQTT-------------------------------------------------
-
-        //Comunicacao ESPNOW-----------------------------------------------
-        intracom_read(received_msg);
-        float msg = atof(received_msg);
-        if (msg == 101.0f) {
-            LastBrokerMsg = Time;
-            printf("Intracom: synchronized in %lld\n", (long long)LastBrokerMsg);
-        }
-        memset(received_msg, 0, sizeof(received_msg));
-        //Comunicacao ESPNOW-----------------------------------------------
         
         vTaskDelay(pdMS_TO_TICKS(200));
     }
