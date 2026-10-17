@@ -58,7 +58,6 @@ void app_main(void) {
     led_set(false, 0, 0, 0);
     
     while (1) {
-        printf("carga termica: %.1f\n", carga_termica);
         Time = esp_timer_get_time()/1000000;
         memset(&cmd, 0, sizeof(cmd));
         if (IRerror >= 6) {data[4] = 6.0f; IRerror = 0;}
