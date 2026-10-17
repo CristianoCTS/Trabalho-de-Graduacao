@@ -14,6 +14,8 @@ typedef struct {
     char pub[ESPS_NUM][64];
     char sub[ESPS_NUM][64];
     char par[ESPS_NUM][64];
+    char time[ESPS_NUM][64];
+    char ocpt[ESPS_NUM][64];
 } MQTT_t;
  
 static const MQTT_t MQTT = {
@@ -28,6 +30,8 @@ static char MQTTid[16];
 static char MQTTpub[64];
 static char MQTTsub[64];
 static char MQTTpar[64];
+static char MQTTtime[64];
+static char MQTTocpt[64];
  
 static inline void credentials_init(void) {
     if (ESP_Iam == -1) {
@@ -42,4 +46,6 @@ static inline void credentials_init(void) {
     snprintf(MQTTpub, sizeof(MQTTpub), "%s", MQTT.pub[ESP_Iam]);
     snprintf(MQTTsub, sizeof(MQTTsub), "%s", MQTT.sub[ESP_Iam]);
     snprintf(MQTTpar, sizeof(MQTTpar), "%s", MQTT.par[ESP_Iam]);
+    snprintf(MQTTtime, sizeof(MQTTtime), "%s", MQTT.time[ESP_Iam]);
+    snprintf(MQTTocpt, sizeof(MQTTocpt), "%s", MQTT.ocpt[ESP_Iam]);
 }

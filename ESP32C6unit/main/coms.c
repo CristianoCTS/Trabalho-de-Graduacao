@@ -18,6 +18,8 @@ static char msn[20] = "";
 static char received_msg[20] = "";
 float parameters[20] = { 20, 26, 23, 0.3f, 20, 26, 1.0f, 15, 30, 3.0f, 27, 0.25f, 0.002f, 120, 1.0f, 0.3f, -0.2f, 10800, 14400, 0 };
 static char mqtt_parameters[64] = "";
+static char mqtt_time[20] = "";
+static char mqtt_ocpt[20] = "";
 static char last_parameters[64] = "";
 
 
@@ -45,11 +47,19 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             printf("intercom: MQTT conectado\n");
             esp_mqtt_client_subscribe(mqtt_client, MQTTsub, 0);
             esp_mqtt_client_subscribe(mqtt_client, MQTTpar, 0);
+            esp_mqtt_client_subscribe(mqtt_client, MQTTtime, 0);
+            esp_mqtt_client_subscribe(mqtt_client, MQTTocpt, 0);
             break;
         case MQTT_EVENT_DATA:
             if (event->topic_len == (int)strlen(MQTTpar) && strncmp(event->topic, MQTTpar, event->topic_len) == 0) {
                 snprintf(mqtt_parameters, sizeof(mqtt_parameters), "%.*s", event->data_len, event->data);
                 printf("intercom: Parametros recebidos: %s\n", mqtt_parameters);
+            } else if (event->topic_len == (int)strlen(MQTTtime) && strncmp(event->topic, MQTTtime, event->topic_len) == 0) {
+                snprintf(mqtt_time, sizeof(mqtt_time), "%.*s", event->data_len, event->data);
+                printf("intercom: Tempo recebido: %s\n", mqtt_time);
+            } else if (event->topic_len == (int)strlen(MQTTocpt) && strncmp(event->topic, MQTTocpt, event->topic_len) == 0) {
+                snprintf(mqtt_ocpt, sizeof(mqtt_ocpt), "%.*s", event->data_len, event->data);
+                printf("intercom: Ocupacao recebida: %s\n", mqtt_ocpt);
             } else {
                 snprintf(mqtt_received, sizeof(mqtt_received), "%.*s", event->data_len, event->data);
                 printf("intercom: Recebido: %s\n", mqtt_received);
@@ -197,7 +207,7 @@ void coms_init(bool all) {
 bool intercom_send(const float *data) {
     if (!mqtt_conected) return false;
     char buf[128];
-    snprintf(buf, sizeof(buf), "field1=%.1f&field2=%.1f&field3=%.1f&field4=%.1f&field5=%.1f", data[0], data[1], data[2], data[3], data[4]);
+    snprintf(buf, sizeof(buf), "field1=%.1f&field2=%.1f&field3=%.1f&field4=%.1f&field5=%.1f&field6=%.1f", data[0], data[1], data[2], data[3], data[4], data[5]);
     esp_mqtt_client_publish(mqtt_client, MQTTpub, buf, 0, 1, 0);
     return true;
 }
@@ -207,6 +217,22 @@ bool intercom_read(char *out) {
     strncpy(out, mqtt_received, sizeof(mqtt_received) - 1);
     out[sizeof(mqtt_received) - 1] = '\0';
     memset(mqtt_received, 0, sizeof(mqtt_received));
+    return has_msg;
+}
+
+bool intercom_timestamp(char *out) {
+    bool has_msg = (mqtt_time[0] != '\0');
+    strncpy(out, mqtt_time, sizeof(mqtt_time) - 1);
+    out[sizeof(mqtt_time) - 1] = '\0';
+    memset(mqtt_time, 0, sizeof(mqtt_time));
+    return has_msg;
+}
+
+bool intercom_ocupation(char *out) {
+    bool has_msg = (mqtt_ocpt[0] != '\0');
+    strncpy(out, mqtt_ocpt, sizeof(mqtt_ocpt) - 1);
+    out[sizeof(mqtt_ocpt) - 1] = '\0';
+    memset(mqtt_ocpt, 0, sizeof(mqtt_ocpt));
     return has_msg;
 }
 

@@ -1,11 +1,11 @@
 %======Aqui segue o código com os dados sensiveis omitidos======
 
 % ==== Lê dados de cada ESP ====
-dados = NaN(numESPs, 5);
+dados = NaN(numESPs, 6);
 
 for i = 1:numESPs
     try
-        d = thingSpeakRead(espChIds(i),'Fields', 1:5, 'NumPoints', 1, 'ReadKey', espReadKeys{i});
+        d = thingSpeakRead(espChIds(i),'Fields', 1:6, 'NumPoints', 1, 'ReadKey', espReadKeys{i});
         dados(i,:) = d;
     catch
         fprintf('Falha ao ler canal %d\n', espChIds(i));
@@ -15,7 +15,15 @@ ctrl = thingSpeakRead(espChIds(3), 'Fields', 1:3,'NumPoints', 1, 'ReadKey', espR
 ControlType = ctrl(1);
 SetPoint = ctrl(2);
 GastoEnergetico = ctrl(3);
-Ocupacao = max(dados(:,4), [], 'omitnan');
+MsgESPs = dados(:,5);
+OcpESPS = dados(:,4);
+oc = thingSpeakRead(writeChId, 'Field', 6, 'NumPoints', 1, 'ReadKey', readKeyBrk);
+hr = thingSpeakRead(writeChId, 'Field', 7, 'NumPoints', 1, 'ReadKey', readKeyBrk);
+if isnan(oc), oc = 0; end
+if isnan(hr), hr = 0; end
+Ocupacao = GetOcupation(OcpESPS(1), OcpESPS(2), MsgESPs(1), MsgESPs(2), oc, hr);
+Alerta = Alertas(MsgESPs(1), MsgESPs(2));
+
 
 % ==== Garante 15 segundos desde o último write no broker ====
 try
@@ -36,7 +44,7 @@ if elapsed < minInterval
 end
 
 comand = BrokerControl(ControlType, SetPoint, Ocupacao)
-codigo = comand
+codigo = comand;
 parametros = '020026023030020026100015030300027025020120100030020003004000';
 FLAG = -1;
 ctrlAnterior = GetLastControlType(writeChId, readKeyBrk);
@@ -54,10 +62,13 @@ if ctValido && ~isnan(GastoEnergetico)
     energia(ControlType) = GastoEnergetico;
 end
 
+t = datetime('now');
+TimeS = minute(t) * 60 + floor(second(t));
+
 if NovoGasto || houveTroca
-    thingSpeakWrite(writeChId, {codigo, parametros, energia(1), energia(2), energia(3)}, 'Fields', 1:5, 'WriteKey', writeKey);
+    thingSpeakWrite(writeChId, {codigo, parametros, energia(1), energia(2), energia(3), Ocupacao, TimeS, Alerta}, 'Fields', 1:8, 'WriteKey', writeKey);
 else
-     thingSpeakWrite(writeChId, {codigo, parametros}, 'Fields', [1 2], 'WriteKey', writeKey);
+     thingSpeakWrite(writeChId, {codigo, parametros, Ocupacao, TimeS, Alerta}, 'Fields', [1 2 6 7 8], 'WriteKey', writeKey);
 end
 
 %==================================Funcoes================================================%
@@ -76,14 +87,102 @@ function comando = BrokerControl(ControlType, SetPoint, Ocupacao)
     comando = (SetPoint * 1e4) + (ControlType * 1e3) + (msg1 * 1e2) + (msg2 * 1e1) + ESPactive;
 end
 function ct = GetLastControlType(writeChId, readKeyBrk)
-try
- valor = thingSpeakRead(writeChId, 'Field', 1, 'NumPoints', 1, 'ReadKey', readKeyBrk);
- if isnan(valor)
+    try
+     valor = thingSpeakRead(writeChId, 'Field', 1, 'NumPoints', 1, 'ReadKey', readKeyBrk);
+        if isnan(valor)
+            ct = NaN;
+        else
+            ct = mod(floor(round(valor)/1e3), 10);
+        end
+    catch
      ct = NaN;
- else
-     ct = mod(floor(round(valor)/1e3), 10);
- end
-catch
- ct = NaN;
+    end
 end
+function ocp = GetOcupation(a, b, c, d, o, h)
+    da = floor(a/1e4);  
+    ta = mod(a, 1e4);
+    db = floor(b/1e4);  
+    tb = mod(b, 1e4);
+    try
+        if (c == 2)
+            if (tb >= h)
+                ocp = o + db;
+            else
+                ocp = o + da;
+            end
+        elseif (d == 2)
+            if (ta >= h)
+                ocp = o + da;
+            else
+                ocp = o + db;
+            end
+        elseif c == 8 || d == 8
+            ocp = 0;
+        elseif abs(ta - tb) > 5
+            ocp = o + (da + db);
+        else
+            ocp = o + max(da, db);
+         end
+    catch
+     ocp = o;
+    end
+    ocp = max(ocp, 0);
+end
+function alrt = Alertas(a, b)
+    alrt1 = 0;
+    alrt2 = 0;
+    try
+        switch a
+            case 0
+                %pass%
+            case 1
+                %pass%
+            case 2
+                %pass%
+            case 3
+                %pass%
+            case 4
+                %pass%
+            case 5
+                %pass%
+            case 6
+                alrt1 = 6;
+            case 7
+                alrt1 = 7;
+            case 8
+                %pass%
+            case 9
+                %pass%
+            otherwise
+                disp('Modo inválido')
+        end
+        switch b
+            case 0
+                %pass%
+            case 1
+                %pass%
+            case 2
+                %pass%
+            case 3
+                %pass%
+            case 4
+                %pass%
+            case 5
+                %pass%
+            case 6
+                alrt2 = 6;
+            case 7
+                alrt2 = 7;
+            case 8
+                %pass%
+            case 9
+                %pass%
+            otherwise
+                disp('Modo inválido')
+        end
+    catch
+        alrt1 = 0;
+        alrt2 = 0;
+    end
+    alrt = (alrt1 * 10) + alrt2;
 end
