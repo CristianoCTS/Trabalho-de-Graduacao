@@ -32,7 +32,6 @@ char instrucao[20] = ""; //ABCDEFGHIJ
 char horario[20] = ""; //Segundos
 char ocupacao[20] = ""; //N
 float data[] = {24.0f, 24.0f, 55.0f, 0.0f, 0.0f, 24.0f}; // {DS18B20, DHT22_t, DHT22_h, Ocupacao, Mensagens, TemperaturaEnviada}
-float wakeup_data[] = {24.0f, 24.0f, 55.0f, 0.0f, 0.0f, 24.0f};
 float last_temp = 0.0f;
 float temp_alvo = 25.0f;
 float new_temp = 23.0f;
@@ -65,35 +64,18 @@ void app_main(void) {
 
         //Comunicacao MQTT-------------------------------------------------
         if (data[3] > 0 && (ocupation == 0 || isnan(ocupation))) { // 0 segundos
-            TimeStamp += (float)((Time - LastBrokerMsg) % 3600); // valor em que o timestamp ser maior ou menos não muda nada 
-            wakeup_data[3] += (data[3] * 10000.0f) + TimeStamp;
-            wakeup_data[4] = 2.0f;
-            if (intercom_send(wakeup_data)) {
-                ocupation = data[3];
-                data[3] = 0.0f;
-                memset(&cmd, 0, sizeof(cmd));
-                cmd.power = EMITER_ON;
-                HVACon = true;
-                if (send_ir_command(&cmd)) {
-                    printf("Turn HVAC on: %.1f\n", temp_alvo);
-                    IRerror = 0;
-                } else {
-                    HVACon = false;
-                    IRerror += 1;
-                    printf("Falha ao enviar comando de ligar ao HVAC\n");
-                }
-                TimeStamp -= (float)((Time - LastBrokerMsg) % 3600);
-                LastBrokerMsg = Time;
-                printf("ESP%i woke up at %lld\n", ESP_Iam, (long long)LastBrokerMsg);
-                led_blink(0, 150, 20);
-                COMSerror = 0;
+            memset(&cmd, 0, sizeof(cmd));
+            cmd.power = EMITER_ON;
+            HVACon = true;
+            if (send_ir_command(&cmd)) {
+                printf("Turn HVAC on: %.1f\n", temp_alvo);
+                IRerror = 0;
+                led_blink(255, 255, 255);
             } else {
-                printf("Falha ao enviar mensagem de wakeup\n");
-                COMSerror += 1;
-                TimeStamp -= (float)((Time - LastBrokerMsg) % 3600);
-            }    
-            wakeup_data[3] = 0.0f; 
-            wakeup_data[4] = 0.0f;
+                HVACon = false;
+                IRerror += 1;
+                printf("Falha ao enviar comando de ligar ao HVAC\n");
+            }
         }
 
         if ((Time - LastBrokerMsg) >= reading_interval) { // 4 segundos
@@ -220,6 +202,9 @@ void app_main(void) {
                 case 4: //Degrau
                     new_temp = Step(ocupation, temp_alvo);
                     break;
+                case 5: //Direto
+                    new_temp = Direct(ocupation, temp_alvo);
+                    break;
                 default:
                     printf("Tipo de controle inválido\n");
                     new_temp = LigaDesliga(ocupation, temp_alvo);
@@ -230,24 +215,24 @@ void app_main(void) {
         //Obtencao de dados------------------------------------------------
 
         if ((Time - LastBrokerMsg) >= broker_interval) { // 15 segundos
-            if (command == 1) {
-                TimeStamp += (float)((Time - LastBrokerMsg) % 3600);
-                data[3] = (data[3] * 10000.0f) + TimeStamp;
-                if (intercom_send(data)) {
-                    data[3] = 0.0f;
-                    data[4] = 0.0f;
-                    command = 0;
-                    TimeStamp -= (float)((Time - LastBrokerMsg) % 3600);
-                    LastBrokerMsg = Time;
-                    printf("ESP%i sent broker a message at %lld\n", ESP_Iam, (long long)LastBrokerMsg);
-                    led_blink(0, 150, 20);
-                    COMSerror = 0;
-                } else {
-                    printf("Falha ao enviar mensagem ao broker\n");
-                    data[3] = floorf(data[3] / 10000.0f);
-                    COMSerror += 1;
-                    TimeStamp -= (float)((Time - LastBrokerMsg) % 3600);
-                }
+            TimeStamp += (float)(((Time - LastBrokerMsg) % 3600) + (assinatura * 5));
+            if (data[3] < 0) {data[3] = (data[3] * 10000.0f) - TimeStamp;} 
+            else {data[3] = (data[3] * 10000.0f) + TimeStamp;}
+            if (intercom_send(data)) {
+                printf("ESP%i sent broker a variance of %f in ocupation\n", ESP_Iam, data[3]);
+                data[3] = 0.0f;
+                data[4] = 0.0f;
+                command = 0;
+                TimeStamp -= (float)((Time - LastBrokerMsg) % 3600);
+                LastBrokerMsg = Time;
+                printf("ESP%i sent broker a message at %lld\n", ESP_Iam, (long long)LastBrokerMsg);
+                led_blink(0, 150, 20);
+                COMSerror = 0;
+            } else {
+                printf("Falha ao enviar mensagem ao broker\n");
+                data[3] = floorf(data[3] / 10000.0f);
+                COMSerror += 1;
+                TimeStamp -= (float)((Time - LastBrokerMsg) % 3600);
             }
         }
 

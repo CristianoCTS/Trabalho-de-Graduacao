@@ -11,3 +11,4 @@ float LigaDesliga(float Ocupacao, float temp_alvo);
 float ControlPI(float Ocupacao, float temp_alvo);
 float ControlAdap(float Ocupacao, float temp_alvo);
 float Step(float Ocupacao, float temp_alvo);
+float Direct(float Ocupacao, float temp_alvo);

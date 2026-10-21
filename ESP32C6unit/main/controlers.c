@@ -135,3 +135,8 @@ float Step(float Ocupacao, float temp_alvo) {
     ultimo_setp = (t < STEP_LIGADO_S) ? SET_MIN : SET_MAX;
     return ultimo_setp;
 }
+
+float Direct(float Ocupacao, float temp_alvo) {
+    (void)Ocupacao;
+    return temp_alvo;
+}

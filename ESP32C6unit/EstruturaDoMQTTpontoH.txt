@@ -1,9 +1,12 @@
 #include <stdio.h>
 #include "MAC.h" 
 
-
-*Aqui ficam os defines
-
+#define SSID ""  //nome da rede
+#define SSIDp "" //senha da rede
+#define MQTT_port 1883
+#define MQTT_BROKER "mqtt://mqtt3.thingspeak.com"
+#define BROKERid "@" //chanel id do canal do broker
+#define ESPS_NUM 3 
 
 typedef struct {
     char HOSTNAME[ESPS_NUM][32];
@@ -19,7 +22,16 @@ typedef struct {
 } MQTT_t;
  
 static const MQTT_t MQTT = {
-*Aqui ficam os dados
+    .HOSTNAME = {"ESP32C6ESP_Iam0", "ESP32C6ESP_Iam1", "ESP32C6ESP_Iam2"}, //hostnames cadastrados no TS
+    .u   = {"C1", "C2", "C3"}, //MQTT client id dos dispositivos
+    .p   = {"P1", "P2", "P3"}, //password dadas na criação do dispositivo
+    .c   = {"C1", "C2", "C3"}, //MQTT client id dos dispositivos
+    .id  = {"*", "**", "***"}, //channel id dos canais dos dispositivos
+    .pub = {"channels/*/publish", "channels/**/publish", "channels/***/publish"},
+    .sub = {"channels/@/subscribe/fields/field1", "channels/@/subscribe/fields/field1", "channels/@/subscribe/fields/field1"},
+    .par = {"channels/@/subscribe/fields/field2", "channels/@/subscribe/fields/field2", "channels/@/subscribe/fields/field2"},
+    .time = {"channels/@/subscribe/fields/field7", "channels/@/subscribe/fields/field7", "channels/@/subscribe/fields/field7"},
+    .ocpt = {"channels/@/subscribe/fields/field6", "channels/@/subscribe/fields/field6", "channels/@/subscribe/fields/field6"}
 };
  
 static char HOSTNAME[32];
