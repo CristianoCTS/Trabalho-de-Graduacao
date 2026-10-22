@@ -138,5 +138,5 @@ float Step(float Ocupacao, float temp_alvo) {
 
 float Direct(float Ocupacao, float temp_alvo) {
     (void)Ocupacao;
-    return temp_alvo;
+    return finaliza(temp_alvo);
 }

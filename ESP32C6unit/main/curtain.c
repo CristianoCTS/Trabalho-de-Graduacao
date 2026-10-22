@@ -4,6 +4,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "driver/gpio.h"
+#include "esp_timer.h"
 #include "led_strip.h"
 #include "curtain.h"
 #include "PIRcurtain.h"
@@ -18,7 +19,7 @@
 
 float carga_termica = 0.0f;
 float holder = 0.0f;
-char CG_espnow[20] = "";
+char CT_espnow[20] = "";
 int64_t assinatura = 0;
 
 typedef enum {
@@ -46,15 +47,11 @@ static void curtain_task(void *params)
     while (true) {
         btn_combo_t atual = BTN_read();
 
-        if (intracom_read(CG_espnow)) {
-            holder = atof(CG_espnow);
+        if (intracom_read(CT_espnow)) {
+            holder = atof(CT_espnow);
             printf("Intracom: carga termica recebida: %.1f\n", holder);
-        if (holder <= 50.0f) {
             carga_termica += holder;
-            if (assinatura <= 100) {assinatura = 0;}
-            if (holder > 0.0f) {assinatura += 1;}
-            holder = 0.0f;
-        } else {
+            if (!(holder == 0.0f)) {assinatura = esp_timer_get_time()/1000000;}
             holder = 0.0f;
         }
         if (anterior == BTN_N && atual != BTN_N) {
