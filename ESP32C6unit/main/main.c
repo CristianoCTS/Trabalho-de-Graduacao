@@ -40,7 +40,6 @@ float DS18B20 = 0.0f;
 dht22_reading_t DHT22 = {0.0f, 0.0f};
 emiter_cmd_t cmd = {0};
 int ControlType = 1;
-float TimeStamp = 0.0f;
 float ocupation = NAN;
 int64_t IRerror = 0;
 int64_t COMSerror = 0;
@@ -83,11 +82,6 @@ void app_main(void) {
             //Obtencao de Parametros--------------------------------------------------------
             intercom_read_parameters();
             //Obtencao de Parametros--------------------------------------------------------
-            //Obtencao da Time Stamp--------------------------------------------------------
-            if (intercom_timestamp(horario)) {
-                TimeStamp = atof(horario);
-            }
-            //Obtencao da Time Stamp--------------------------------------------------------
             //Obtencao da Ocupação----------------------------------------------------------
             if (intercom_ocupation(ocupacao)) {
                 ocupation = atof(ocupacao); // N
@@ -216,28 +210,18 @@ void app_main(void) {
         //Obtencao de dados------------------------------------------------
 
         if ((Time - LastBrokerMsg) >= broker_interval) { // 15 segundos
-            if (assinatura > LastBrokerMsg) {TimeStamp += (float)(((assinatura - LastBrokerMsg) % 3600));}
-            else {TimeStamp += (float)(((Time - LastBrokerMsg) % 3600));}
-            if (data[3] < 0) {data[3] = (data[3] * 10000.0f) - TimeStamp;} 
-            else {data[3] = (data[3] * 10000.0f) + TimeStamp;}
             if (intercom_send(data)) {
                 printf("ESP%i sent broker a variance of %f in ocupation\n", ESP_Iam, data[3]);
                 data[3] = 0.0f;
                 data[4] = 0.0f;
                 command = 0;
-                if (assinatura > LastBrokerMsg) {TimeStamp -= (float)((assinatura - LastBrokerMsg) % 3600);}
-                else {TimeStamp -= (float)(((Time - LastBrokerMsg) % 3600));}
-                assinatura = 0;
                 LastBrokerMsg = Time;
                 printf("ESP%i sent broker a message at %lld\n", ESP_Iam, (long long)LastBrokerMsg);
                 led_blink(0, 150, 20);
                 COMSerror = 0;
             } else {
                 printf("Falha ao enviar mensagem ao broker\n");
-                data[3] = truncf(data[3] / 10000.0f);
                 COMSerror += 1;
-                if (assinatura > LastBrokerMsg) {TimeStamp -= (float)((assinatura - LastBrokerMsg) % 3600);}
-                else {TimeStamp -= (float)(((Time - LastBrokerMsg) % 3600));}
             }
         }
 

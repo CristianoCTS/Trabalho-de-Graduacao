@@ -20,7 +20,6 @@
 float carga_termica = 0.0f;
 float holder = 0.0f;
 char CT_espnow[20] = "";
-int64_t assinatura = 0;
 
 typedef enum {
     BTN_N = 0,
@@ -51,7 +50,6 @@ static void curtain_task(void *params)
             holder = atof(CT_espnow);
             printf("Intracom: carga termica recebida: %.1f\n", holder);
             carga_termica += holder;
-            if (!(holder == 0.0f)) {assinatura = esp_timer_get_time()/1000000;}
             holder = 0.0f;
         }
         if (anterior == BTN_N && atual != BTN_N) {

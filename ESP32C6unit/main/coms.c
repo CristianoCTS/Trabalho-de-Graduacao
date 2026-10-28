@@ -2,6 +2,7 @@
 #include <stdio.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "freertos/semphr.h"
 #include "esp_wifi.h"
 #include "esp_now.h"
 #include "MAC.h"
@@ -21,6 +22,8 @@ static char mqtt_parameters[64] = "";
 static char mqtt_time[20] = "";
 static char mqtt_ocpt[20] = "";
 static char last_parameters[64] = "";
+static SemaphoreHandle_t send_sem;
+static volatile bool send_ok = false;
 
 
 static void event_handler(void *arg, esp_event_base_t event_base, int32_t event_id, void *event_data) {
@@ -85,6 +88,18 @@ static void receive_msg(const esp_now_recv_info_t *info, const uint8_t *data, in
     }
 }
 
+static void send_result(const uint8_t *mac_addr, esp_now_send_status_t status) {
+    send_ok = (status == ESP_NOW_SEND_SUCCESS);
+    xSemaphoreGive(send_sem);
+}
+
+static bool send_and_wait(const uint8_t *mac, const char *msg) {
+    xSemaphoreTake(send_sem, 0);
+    if (esp_now_send(mac, (const uint8_t *)msg, strlen(msg)) != ESP_OK) return false;
+    if (xSemaphoreTake(send_sem, pdMS_TO_TICKS(10)) != pdTRUE) return false;
+    return send_ok;
+}
+
 void coms_init(bool all) {
 
     if (all) {
@@ -143,6 +158,8 @@ void coms_init(bool all) {
             }
         }
         esp_now_init(); // Inicia ESP-NOW
+        send_sem = xSemaphoreCreateBinary();
+        esp_now_register_send_cb(send_result);
         esp_now_register_recv_cb(receive_msg);
         
         for (int i = 0; i < (NUM_ESPS - 1); i++) { // Registra peers
@@ -191,6 +208,8 @@ void coms_init(bool all) {
             }
         }
         esp_now_init(); // Inicia ESP-NOW
+        send_sem = xSemaphoreCreateBinary();
+        esp_now_register_send_cb(send_result);
         esp_now_register_recv_cb(receive_msg);
         
         for (int i = 0; i < (NUM_ESPS - 1); i++) { // Registra peers
@@ -272,7 +291,7 @@ bool intracom_send(const float *data, int slave_index) {
             //     slaves[i][0], slaves[i][1], slaves[i][2],
             //     slaves[i][3], slaves[i][4], slaves[i][5]);
             strcpy(msn, message);
-            if (esp_now_send(slaves[i], (uint8_t *)msn, strlen(msn)) != ESP_OK) {
+            if (!send_and_wait(slaves[i], msn)) {
                 printf("Failed to reach to MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
                 slaves[i][0], slaves[i][1], slaves[i][2],
                 slaves[i][3], slaves[i][4], slaves[i][5]);
@@ -285,7 +304,7 @@ bool intracom_send(const float *data, int slave_index) {
         //     slaves[slave_index][0], slaves[slave_index][1], slaves[slave_index][2],
         //     slaves[slave_index][3], slaves[slave_index][4], slaves[slave_index][5]);
         strcpy(msn, message);
-        if (esp_now_send(slaves[slave_index], (uint8_t *)msn, strlen(msn)) != ESP_OK) {
+        if (!send_and_wait(slaves[slave_index], msn)) {
             printf("Failed to reach to MAC: %02X:%02X:%02X:%02X:%02X:%02X\n",
             slaves[slave_index][0], slaves[slave_index][1], slaves[slave_index][2],
             slaves[slave_index][3], slaves[slave_index][4], slaves[slave_index][5]);

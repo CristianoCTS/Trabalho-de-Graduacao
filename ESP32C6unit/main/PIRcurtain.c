@@ -4,11 +4,13 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "driver/gpio.h"
 #include "esp_timer.h"
 #include "led_strip.h"
 #include "esp_err.h"
 #include "coms.h"
+#include "MAC.h"
 #include "PIRcurtain.h"
 
 
@@ -32,6 +34,9 @@ bool ambos = false;
 bool estado_led = false;
 float direcao = 0.0f;
 static led_strip_handle_t led = NULL;
+int64_t COMSerror = 0;
+int64_t ESPdestino = -1;
+static TaskHandle_t tarefa_envio;
 
 void led_set(bool ligado, int r, int g, int b)
 {
@@ -107,6 +112,8 @@ static void monitora_psg(void *arg)
 
     while (1) {
         ambos = false;
+        if (COMSerror >= 7) {led_set(true, 150, 150, 150);}
+        else {led_set(false, 0, 0, 0);}
         if (xQueueReceive(fila, &primeiro, portMAX_DELAY) != pdTRUE) {
             continue;
         }
@@ -114,19 +121,18 @@ static void monitora_psg(void *arg)
             segundo.sensor != primeiro.sensor) {
             ambos = true;
         }
-        direcao = 0.0f;
 
         if (ambos) {
             int32_t delta_ms = (int32_t)((segundo.t_us - primeiro.t_us) / 1000);
             if (primeiro.sensor == 0) {
-                direcao = 1.0f;
+                direcao += 1.0f;
                 printf("ENTRADA (A->B)(intervalo %ld ms)\n", (long)delta_ms);
-                intracom_send(&direcao, -1);
+                xTaskNotifyGive(tarefa_envio);
                 led_blink(60, 0, 0);
             } else {
-                direcao = -1.0f;
+                direcao += -1.0f;
                 printf("SAIDA (B->A)(intervalo %ld ms)\n", (long)delta_ms);
-                intracom_send(&direcao, -1);
+                xTaskNotifyGive(tarefa_envio);
                 led_blink(0, 0, 60);
             }
         } else {
@@ -138,10 +144,25 @@ static void monitora_psg(void *arg)
     }
 }
 
+static void EnviaEvento(void *arg) {
+    while (1) {
+    if (direcao != 0.0f) {
+        if (intracom_send(&direcao, ESPdestino)) {direcao = 0.0f; COMSerror = 0;}
+        else {COMSerror += 1; vTaskDelay(pdMS_TO_TICKS(1000));}
+        vTaskDelay(pdMS_TO_TICKS(50));
+    } else {ulTaskNotifyTake(pdTRUE, portMAX_DELAY);}
+    }
+}
+
 void PIRcurtain_init(void)
 {
     led_init();
     coms_init(false);
+    switch (ESP_Iam) {
+        case 1: ESPdestino = 2; break;
+        case 2: ESPdestino = 1; break;
+        default: ESPdestino = -1; break;
+    }
     
     fila = xQueueCreate(8, sizeof(evento_t));
 
@@ -159,4 +180,5 @@ void PIRcurtain_init(void)
     gpio_isr_handler_add(sensorB, isr_sensor, (void *)1);
 
     xTaskCreate(monitora_psg, "passagem", 4096, NULL, 5, NULL);
+    xTaskCreate(EnviaEvento, "envia_evento", 4096, NULL, 5, &tarefa_envio);
 }

@@ -1,5 +1,14 @@
 %======Aqui segue o código com os dados sensiveis omitidos======
 
+writeChId  = cid;
+writeKey   = 'wk';
+readKeyBrk = 'rk';
+minInterval = 15;
+
+espChIds = [ce1, ce2, ce3];
+espReadKeys = {'rk1', 'rk2', 'rk3'};
+numESPs = 2;
+
 %==========================Obtenção das variaveis==========================%
 IntervaloMinimo(minInterval, writeChId, readKeyBrk)
 dados = NaN(numESPs, 6);
@@ -60,7 +69,7 @@ end
 %===============================Funcoes====================================%
 
 function comando = BrokerControl(ControlType, SetPoint, Ocupacao)
-    if ControlType == 3 && Ocupacao <= 0
+    if (((ControlType == 3) || (ControlType == 5)) && Ocupacao <= 0)
         msg1 = 9;
         msg2 = 9;
         ESPactive = 0;
@@ -105,24 +114,11 @@ end
 function ocp = GetOcupation(a, b, c, d, o)
     if isnan(a), a = 0; end
     if isnan(b), b = 0; end
-    da = fix(a/1e4);
-    db = fix(b/1e4);
-    aa = abs(da);
-    ab = abs(db);
-    ta = abs(rem(a, 1e4));
-    tb = abs(rem(b, 1e4));
     try
         if c == 8 || d == 8
             ocp = 0;
-        elseif (abs(ta-tb) > 5)
-            ocp = o + da + db;
         else
-            if (aa > ab)
-                ocp = o + da;
-            else
-                ocp = o + db;
-            end
-        
+            ocp = o + a + b;
         end
     catch
         ocp = o;
@@ -135,49 +131,49 @@ function alrt = Alertas(a, b)
     try
         switch a
             case 0
-                %pass%
+                alrt1 = 0;
             case 1
-                %pass%
+                alrt1 = 1;
             case 2
-                %pass%
+                alrt1 = 2;
             case 3
-                %pass%
+                alrt1 = 3;
             case 4
-                %pass%
+                alrt1 = 4;
             case 5
-                %pass%
+                alrt1 = 5;
             case 6
                 alrt1 = 6;
             case 7
                 alrt1 = 7;
             case 8
-                %pass%
+                alrt1 = 8;
             case 9
-                %pass%
+                alrt1 = 9;
             otherwise
                 disp('Modo inválido')
         end
         switch b
             case 0
-                %pass%
+                alrt2 = 0;
             case 1
-                %pass%
+                alrt2 = 1;
             case 2
-                %pass%
+                alrt2 = 2;
             case 3
-                %pass%
+                alrt2 = 3;
             case 4
-                %pass%
+                alrt2 = 4;
             case 5
-                %pass%
+                alrt2 = 5;
             case 6
                 alrt2 = 6;
             case 7
                 alrt2 = 7;
             case 8
-                %pass%
+                alrt2 = 8;
             case 9
-                %pass%
+                alrt2 = 9;
             otherwise
                 disp('Modo inválido')
         end
