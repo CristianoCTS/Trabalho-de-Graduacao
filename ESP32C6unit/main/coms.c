@@ -96,7 +96,7 @@ static void send_result(const esp_now_send_info_t *tx_info, esp_now_send_status_
 static bool send_and_wait(const uint8_t *mac, const char *msg) {
     xSemaphoreTake(send_sem, 0);
     if (esp_now_send(mac, (const uint8_t *)msg, strlen(msg)) != ESP_OK) return false;
-    if (xSemaphoreTake(send_sem, pdMS_TO_TICKS(10)) != pdTRUE) return false;
+    if (xSemaphoreTake(send_sem, pdMS_TO_TICKS(70)) != pdTRUE) return false;
     return send_ok;
 }
 

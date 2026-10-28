@@ -159,8 +159,8 @@ void PIRcurtain_init(void)
     led_init();
     coms_init(false);
     switch (ESP_Iam) {
-        case 1: ESPdestino = 2; break;
-        case 2: ESPdestino = 1; break;
+        case 2: ESPdestino = 0; break;
+        case 3: ESPdestino = 1; break;
         default: ESPdestino = -1; break;
     }
     
