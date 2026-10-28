@@ -34,7 +34,7 @@ bool ambos = false;
 bool estado_led = false;
 float direcao = 0.0f;
 static led_strip_handle_t led = NULL;
-int64_t COMSerror = 0;
+int64_t COMSerrorPIR = 0;
 int64_t ESPdestino = -1;
 static TaskHandle_t tarefa_envio;
 
@@ -112,7 +112,7 @@ static void monitora_psg(void *arg)
 
     while (1) {
         ambos = false;
-        if (COMSerror >= 7) {led_set(true, 150, 150, 150);}
+        if (COMSerrorPIR >= 7) {led_set(true, 150, 150, 150);}
         else {led_set(false, 0, 0, 0);}
         if (xQueueReceive(fila, &primeiro, portMAX_DELAY) != pdTRUE) {
             continue;
@@ -147,8 +147,8 @@ static void monitora_psg(void *arg)
 static void EnviaEvento(void *arg) {
     while (1) {
     if (direcao != 0.0f) {
-        if (intracom_send(&direcao, ESPdestino)) {direcao = 0.0f; COMSerror = 0;}
-        else {COMSerror += 1; vTaskDelay(pdMS_TO_TICKS(1000));}
+        if (intracom_send(&direcao, ESPdestino)) {direcao = 0.0f; COMSerrorPIR = 0;}
+        else {COMSerrorPIR += 1; vTaskDelay(pdMS_TO_TICKS(1000));}
         vTaskDelay(pdMS_TO_TICKS(50));
     } else {ulTaskNotifyTake(pdTRUE, portMAX_DELAY);}
     }

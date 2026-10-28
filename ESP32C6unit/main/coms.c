@@ -88,7 +88,7 @@ static void receive_msg(const esp_now_recv_info_t *info, const uint8_t *data, in
     }
 }
 
-static void send_result(const uint8_t *mac_addr, esp_now_send_status_t status) {
+static void send_result(const esp_now_send_info_t *tx_info, esp_now_send_status_t status) {
     send_ok = (status == ESP_NOW_SEND_SUCCESS);
     xSemaphoreGive(send_sem);
 }
