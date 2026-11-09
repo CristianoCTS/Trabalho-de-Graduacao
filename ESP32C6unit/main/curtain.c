@@ -68,7 +68,7 @@ static void curtain_task(void *params)
                     break;
                 case BTN_A:
                     printf("Botoes 7+6\n");
-                    carga_termica -= 900.0f;
+                    carga_termica -= 1100.0f;
                     led_blink(128, 0, 128);
                     break;
                 default:

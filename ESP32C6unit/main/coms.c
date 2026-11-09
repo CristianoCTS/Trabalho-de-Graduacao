@@ -21,6 +21,7 @@ float parameters[20] = { 20, 26, 23, 0.3f, 20, 26, 1.0f, 15, 30, 3.0f, 27, 0.25f
 static char mqtt_parameters[64] = "";
 static char mqtt_time[20] = "";
 static char mqtt_ocpt[20] = "";
+static char mqtt_warn[20] = "";
 static char last_parameters[64] = "";
 static SemaphoreHandle_t send_sem;
 static volatile bool send_ok = false;
@@ -52,6 +53,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             esp_mqtt_client_subscribe(mqtt_client, MQTTpar, 0);
             esp_mqtt_client_subscribe(mqtt_client, MQTTtime, 0);
             esp_mqtt_client_subscribe(mqtt_client, MQTTocpt, 0);
+            esp_mqtt_client_subscribe(mqtt_client, MQTTwarn, 0);
             break;
         case MQTT_EVENT_DATA:
             if (event->topic_len == (int)strlen(MQTTpar) && strncmp(event->topic, MQTTpar, event->topic_len) == 0) {
@@ -63,6 +65,9 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             } else if (event->topic_len == (int)strlen(MQTTocpt) && strncmp(event->topic, MQTTocpt, event->topic_len) == 0) {
                 snprintf(mqtt_ocpt, sizeof(mqtt_ocpt), "%.*s", event->data_len, event->data);
                 printf("intercom: Ocupacao recebida: %s\n", mqtt_ocpt);
+            } else if (event->topic_len == (int)strlen(MQTTwarn) && strncmp(event->topic, MQTTwarn, event->topic_len) == 0) {
+                snprintf(mqtt_warn, sizeof(mqtt_warn), "%.*s", event->data_len, event->data);
+                printf("intercom: Aviso recebido: %s\n", mqtt_warn);
             } else {
                 snprintf(mqtt_received, sizeof(mqtt_received), "%.*s", event->data_len, event->data);
                 printf("intercom: Recebido: %s\n", mqtt_received);
@@ -252,6 +257,14 @@ bool intercom_ocupation(char *out) {
     strncpy(out, mqtt_ocpt, sizeof(mqtt_ocpt) - 1);
     out[sizeof(mqtt_ocpt) - 1] = '\0';
     memset(mqtt_ocpt, 0, sizeof(mqtt_ocpt));
+    return has_msg;
+}
+
+bool intercom_warnings(char *out) {
+    bool has_msg = (mqtt_warn[0] != '\0');
+    strncpy(out, mqtt_warn, sizeof(mqtt_warn) - 1);
+    out[sizeof(mqtt_warn) - 1] = '\0';
+    memset(mqtt_warn, 0, sizeof(mqtt_warn));
     return has_msg;
 }
 

@@ -10,6 +10,7 @@ bool intercom_send(const float *data);
 bool intercom_read(char *out);
 bool intercom_timestamp(char *out);
 bool intercom_ocupation(char *out);
+bool intercom_warnings(char *out);
 void intercom_read_parameters(void);
 bool intracom_send(const float *data, int slave_index);
 bool intracom_read(char *out_msg);

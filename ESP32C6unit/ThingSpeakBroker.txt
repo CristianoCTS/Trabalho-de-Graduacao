@@ -33,7 +33,7 @@ if isnan(oc), oc = 0; end
 Ocupacao = GetOcupation(OcpESPS(1), OcpESPS(2), MsgESPs(1), MsgESPs(2), oc);
 Alerta = Alertas(MsgESPs(1), MsgESPs(2));
 comand = BrokerControl(ControlType, SetPoint, Ocupacao)
-codigo = comand;
+codigo = comand
 FLAG = -1;
 ctrlAnterior = GetLastControlType(writeChId, readKeyBrk);
 houveTroca = isnan(ctrlAnterior) || (ctrlAnterior ~= ControlType);
@@ -45,7 +45,7 @@ TimeS = minute(t) * 60 + floor(second(t));
 %==========================Obtenção das variaveis==========================%
 
 %============================Tomada de decisões============================%
-if Ocupacao > 0,
+if Ocupacao > 0
     parametros = '020026023030020026100015030300027025020120100030020003004000';
 else
     parametros = '020026023030020026100015030300027025020120100030020003004000';
