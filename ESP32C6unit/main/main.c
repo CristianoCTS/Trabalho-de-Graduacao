@@ -38,11 +38,13 @@ float temp_alvo = 25.0f;
 float new_temp = 23.0f;
 float broker_msg = 0.0f;
 float DS18B20 = 0.0f;
+float pub1 = 0.0f;
+float pub2 = 0.0f;
 dht22_reading_t DHT22 = {0.0f, 0.0f};
 emiter_cmd_t cmd = {0};
 int ControlType = 1;
 float ocupation = NAN;
-int alerta = NAN;
+int alerta = 0;
 int64_t IRerror = 0;
 int64_t COMSerror = 0;
 
@@ -87,7 +89,7 @@ void app_main(void) {
             //Obtencao da Ocupação----------------------------------------------------------
             if (intercom_ocupation(ocupacao)) {
                 ocupation = atof(ocupacao); // N
-                if (ocupation <= 0.0f) {data[3] = 0.0f;}
+                if (ocupation <= 0.0f && data[3] == pub1 && data[3] == pub2) {data[3] = 0.0f;}
             }
             if (intercom_warnings(warning)) {
                 alerta = atoi(warning);
@@ -170,7 +172,6 @@ void app_main(void) {
                     IRerror += 1;
                 }
             }
-        }
 
         //Obtencao de dados------------------------------------------------
         if ((Time - LastDataMngt) >= data_interval) { // 8 segundos
@@ -228,7 +229,8 @@ void app_main(void) {
         if ((Time - LastBrokerMsg) >= broker_interval) { // 15 segundos
             if (intercom_send(data)) {
                 printf("ESP%i sent broker a variance of %f in ocupation\n", ESP_Iam, data[3]);
-                data[4] = 0.0f;
+                pub2 = pub1;
+                pub1 = data[3];
                 command = 0;
                 LastBrokerMsg = Time;
                 printf("ESP%i sent broker a message at %lld\n", ESP_Iam, (long long)LastBrokerMsg);

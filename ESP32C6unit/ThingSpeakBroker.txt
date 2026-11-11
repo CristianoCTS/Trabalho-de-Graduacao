@@ -28,9 +28,7 @@ SetPoint = ctrl(2);
 GastoEnergetico = ctrl(3);
 MsgESPs = dados(:,5);
 OcpESPS = dados(:,4);
-oc = thingSpeakRead(writeChId, 'Field', 6, 'NumPoints', 1, 'ReadKey', readKeyBrk);
-if isnan(oc), oc = 0; end
-Ocupacao = GetOcupation(OcpESPS(1), OcpESPS(2), MsgESPs(1), MsgESPs(2), oc);
+Ocupacao = GetOcupation(OcpESPS(1), OcpESPS(2), MsgESPs(1), MsgESPs(2));
 Alerta = Alertas(MsgESPs(1), MsgESPs(2));
 comand = BrokerControl(ControlType, SetPoint, Ocupacao)
 codigo = comand
@@ -111,17 +109,17 @@ function ct = GetLastControlType(writeChId, readKeyBrk)
      ct = NaN;
     end
 end
-function ocp = GetOcupation(a, b, c, d, o)
+function ocp = GetOcupation(a, b, c, d)
     if isnan(a), a = 0; end
     if isnan(b), b = 0; end
     try
         if c == 8 || d == 8
             ocp = 0;
         else
-            ocp = o + a + b;
+            ocp = a + b;
         end
     catch
-        ocp = o;
+        ocp = 0;
     end
     ocp = max(ocp, 0);
 end
