@@ -1,35 +1,36 @@
-
 # Sistema IoT com Estimativa de Ocupação CSI para Automação da Climatização Predial — ESP32-C6
 
-Sistema embarcado multi-placa em ESP32-C6 (ESP-IDF v6.0) que monitora um ambiente (temperatura, umidade e ocupação), controla um ar-condicionado por infravermelho imitando o controle remoto original, e coordena esses dados entre várias unidades ESP32 por Wi-Fi/MQTT e ESP-NOW. Na nuvem, um script MATLAB do ThingSpeak atua como **broker de controle** e um **painel web** permite ao operador escolher o controlador, o setpoint e acompanhar os dados.
+Sistema embarcado multi-placa em ESP32-C6 (ESP-IDF v6.0) que monitora as áreas do Laboratório de Automação e Robótica (LARA) da UnB (temperatura, umidade e ocupação), controla os ar-condicionados por infravermelho imitando o controle remoto original e coordena esses dados entre várias placas por Wi-Fi/MQTT e ESP-NOW. Na nuvem, um script MATLAB do ThingSpeak atua como **broker de controle** e um **painel web** permite ao operador escolher o controlador e o setpoint, registrar o gasto energético e acompanhar os dados. Um **servidor Node.js** intermedeia as publicações do painel no canal de configuração, e uma **tarefa em Python** recalcula periodicamente os parâmetros dos controladores a partir dos dados reais (identificação recursiva).
 
-O sistema tem quatro partes, cada uma com seu próprio código:
+O objetivo é comparar estratégias de controle de temperatura (liga/desliga, PI, adaptativo com ocupação, degrau e direto) quanto ao conforto térmico e ao gasto energético.
 
-**Placas da rede** (`ESP0`, `ESP1`, …)
+O sistema tem seis partes, cada uma com seu próprio código:
 
-Consistem em duas ESP32-C6 que junto ao broker e ao painel, compõem a rede, leem sensores, estimam a ocupação, comandam o ar-condicionado e falam com o broker, cada uma por um canal próprio. Controlam a temperatura por meio de três tipos diferentes de controladores, com o tipo e a temperatura alvo determinados pelo broker.
+**Placas da rede** (`ESP0` e `ESP1`)
 
-**Placas das cortinas**
+Duas ESP32-C6, uma por área controlada. Cada uma lê os sensores, acumula a ocupação vinda da sua cortina, roda localmente o controlador escolhido pelo broker e comanda o seu ar-condicionado. Cada placa publica em um canal ThingSpeak próprio.
 
-Detectam entradas e saídas pelas portas e enviam só a variação de ocupação (`+1` / `-1`) por ESP-NOW
+**Placas das cortinas** (`ESP2` e `ESP3`)
 
-Consistem em duas ESP32-C6 externas à rede, funcionando por sensor de presença PIR, são apenas placeholder para a cortina final, que será por CSI.
-
-Para a rede não importa verdadeiramente como as cortinas funcionam ou o que fazem, basta que envie o numero de entradas/saídas por ESPNOW e nada mais.
+Duas ESP32-C6 externas à rede, uma por porta. Detectam entradas e saídas com dois sensores PIR e enviam a variação de ocupação por ESP-NOW à placa da rede da sua área (`ESP2 → ESP0`, `ESP3 → ESP1`). São um placeholder da cortina final, baseada em CSI, desenvolvida em trabalho paralelo. Para a rede não importa como a cortina funciona: basta que ela envie a variação de ocupação por ESP-NOW.
 
 **Broker ThingSpeak**
 
-Lê os dados das placas e do painel, coordena o comportamento desejado para as unidades HVAC e define os parâmetros para os diferentes tipos de controlador.
-
-É realizado por meio de um MATLAB Analysis no ThingSpeak, acionado por um react que observa o canal do painel web
+Script MATLAB Analysis, disparado por um React que observa o canal do painel. Lê os canais das placas e do painel, soma a ocupação, decide se os ar-condicionados devem continuar ligados, escolhe entre dois vetores de parâmetros dos controladores conforme a ocupação e ecoa ocupação e alertas de volta às placas.
 
 **Painel web LARA Control**
 
-Interface para os usuários, permite selecionar: o tipo controlador(alteração bloqueada por senha) e a temperatura alvo; além de permitir acompanhar por gráficos o gasto energético, temperatura de cada área e a ocupação.
-
-Permite também a publicação do valor exibido no leitor de consumo energético, para monitorar o gasto energético de cada controlador.
+Interface do operador: setpoint, tipo de controlador (com senha), registro do gasto energético e gráficos de temperatura por área, ocupação e gasto.
 
 link: https://laracontrol.netlify.app/
+
+**Servidor do painel**
+
+Programa Node.js, sem dependências externas, que recebe a lista do painel (controlador, setpoint, estado e gasto) e a publica no canal de configuração respeitando o intervalo de 17 s. Também anexa a cada publicação o pacote de parâmetros calculado pela identificação recursiva.
+
+**Identificação recursiva**
+
+Tarefa em Python que, a cada 5 minutos, lê os dados das placas, atualiza por mínimos quadrados recursivos o modelo térmico das áreas e recalcula `Kp`, `Ti` e `kff0`. O resultado vai ao servidor, que o publica, e ao broker, que o aplica.
 
 ----------
 
@@ -38,518 +39,354 @@ link: https://laracontrol.netlify.app/
 ```mermaid
 flowchart LR
   USR["Usuário"]
-  ARES["Unidades HVAC"]
-  CORT["Placa da cortina (PIR hoje, CSI no futuro)"]
+  ARES["Ar-condicionados"]
+  CORT["Cortinas (PIR hoje, CSI no futuro)"]
   ESPS["Placas da rede (ESP0, ESP1)"]
   CHESP["Canais ThingSpeak das placas (Ar 1 e Ar 2)"]
-  CFG["Canal de configuração do site"]
+  CFG["Canal de configuração do painel"]
   MAT["MATLAB Analysis (broker)"]
   BRK["Canal do broker"]
   SITE["Painel web"]
+  SRV["Servidor do painel (Node.js)"]
+  REC["Identificação recursiva (Python)"]
 
-  CORT -->|"ESP-NOW: +x ou -x"| ESPS
-  ESPS -->|"ESP-NOW: 101 (sincronização)"| ESPS
-  ESPS -->|"Comando por IR"| ARES
-  ESPS -->|"MQTT: field1..field5"| CHESP
+  CORT -->|"ESP-NOW: variação de ocupação, com ACK"| ESPS
+  ESPS -->|"IR 38 kHz (GOODWEATHER)"| ARES
+  ESPS -->|"MQTT publish: field1..field6"| CHESP
   CHESP -->|"leitura"| MAT
-  CHESP -->|"ocupação"|SITE
-  USR -->|"Atualixação do controlador, temperatura alvo e gasto"|SITE
-  SITE -->|"HTTP update: controlador, setpoint, gasto"| CFG
-  CFG -->|"leitura"| MAT
-  MAT -->|"escrita: comando, parâmetros, gasto"| BRK
-  BRK -->|"MQTT subscribe"| ESPS
-  CHESP -->|"HTTP: gráficos e ocupação"| SITE
-  BRK -->|"HTTP: gráfico de gasto"| SITE
-
+  USR -->|"controlador, setpoint e gasto"| SITE
+  SITE -->|"HTTP POST: lista"| SRV
+  SRV -->|"HTTP update: field1..field5"| CFG
+  CHESP -->|"HTTP: temperatura, setpoint e ocupação"| REC
+  REC -->|"parametros.json (pacote de 12 dígitos)"| SRV
+  CFG -->|"React + leitura"| MAT
+  MAT -->|"escrita: field1..field8"| BRK
+  BRK -->|"MQTT subscribe: fields 1, 2, 6, 7, 8"| ESPS
+  CHESP -->|"HTTP: temperatura e ocupação"| SITE
+  BRK -->|"HTTP: gasto por controlador"| SITE
 ```
 
 Princípios do desenho:
 
--   **A cortina só informa a derivada da ocupação.** Quem soma as variações em um número de pessoas é o `main.c` das placas da rede. Trocar a cortina PIR pela CSI não exige mudança nas placas da rede.
--   **Duas vias de comunicação com papéis distintos.** _Intercom_ (MQTT) liga as placas ao broker na nuvem; _intracom_ (ESP-NOW) liga as placas à cortina, sem depender de internet.
--   **A conversa com o broker é um "pingue-pongue".** A placa publica seus dados, o MATLAB responde com uma instrução, a placa a aplica e publica de novo. Se o broker manda a placa "dormir" (`ESPactive = 0`), ela para de publicar até detectar uma nova chegada de pessoas.
+-   **A cortina só informa a variação da ocupação.** Quem acumula as variações é o `main.c` de cada placa da rede, e quem soma as áreas é o broker. Trocar a cortina PIR pela CSI não exige mudança nas placas da rede.
+-   **Duas vias de comunicação com papéis distintos.** _Intercom_ (MQTT) liga as placas ao broker na nuvem; _intracom_ (ESP-NOW) liga as cortinas às placas, sem depender de internet.
+-   **Nenhum evento de ocupação se perde.** A cortina reenvia até receber o ACK do ESP-NOW; a placa publica um **nível acumulado** (não um delta) e só o zera quando o broker confirma, por eco, que já o contabilizou.
+-   **A identificação roda fora do broker.** O script MATLAB já é lento, então o recursivo é um programa separado. Ele entrega os parâmetros ao servidor, que os publica no canal de configuração junto com o restante, e o broker só escolhe qual vetor usar.
+-   **O controle roda na borda.** O broker só escolhe o controlador, o setpoint e os parâmetros; o cálculo do setpoint enviado ao ar é feito em cada placa, sobre a temperatura da sua área.
 
 ----------
 
-## Visão geral do hardware
+## Hardware
 
 ### Placas da rede
 
-
 | Periférico | GPIO | Arquivo |
-
 |---|---|---|
-
 | DS18B20 (temperatura, 1-Wire) | 0 | `temperature.c/h` |
+| DHT22 (temperatura e umidade) | 1 | `humidity.c/h` |
+| TSOP4838 (receptor IR) | 4 | `identify.cpp/h` |
+| LED IR TSAL6200 (via 2N2222) | 5 | `emiter.cpp/h` |
+| Botões (entrada manual de ocupação) | 6 e 7 | `curtain.c/h` |
+| LED RGB WS2812 integrado da placa | 8 | `PIRcurtain.c` (funções de LED) |
 
-| DHT22 (temperatura + umidade) | 1 | `humidity.c/h` |
+Componentes: ESP32-C6 N16 DevKit, DS18B20, DHT22, TSOP4838, TSAL6200, 2N2222, L7805CV, fonte 12 V 1 A, push buttons.
 
-| TSOP (receptor IR) | 4 | `identify.cpp/h` |
+Alimentação: fonte de 12 V → L7805CV → 5 V no pino 5V da devkit → regulador da própria devkit → 3V3, que alimenta a ESP, os sensores e o LED IR.
 
-| LED IR (via transistor, emissor) | 5 | `emiter.cpp/h` |
+Emissor IR: o LED fica entre o 3V3 e o coletor do 2N2222 (com resistor limitador em série), o emissor vai ao GND, e a base é acionada pelo GPIO 5 por um resistor, com 10 kΩ de base para o GND.
 
-| Botões (placeholder de ocupação) | 6 e 7 | `curtain.c/h` |
-
-| LED RGB integrado da placa | 8 | `curtain.c` |
-
-### Placa da cortina (PIR)
+### Placas das cortinas (PIR)
 
 | Periférico | GPIO | Arquivo |
-
 |---|---|---|
-| HC-SR501 | 4 e 5| `PIRcurtain.c/h` |
-
+| HC-SR501, sensor A | 4 | `PIRcurtain.c/h` |
+| HC-SR501, sensor B | 5 | `PIRcurtain.c/h` |
 | LED RGB integrado da placa | 8 | `PIRcurtain.c` |
 
-Por consumirem tempo considerável, as leituras dos sensores de temperatura são implementadas como funções comuns, chamadas sob demanda, assim como o envio de dados para o broker, a leitura da cortina funciona por tarefa no entanto. O módulo de identificação de IR (`identify.cpp`), também roda como tarefa contínua porque não há como prever quando um sinal infravermelho vai chegar, e serve apenas para detecção do protocolo de comunicação com o HVAC, não para uso contínuo.
+-   Fonte de **5 V** nos pinos 5V e GND da ESP32-C6, passando por um capacitor eletrolítico de 100 µF e um cerâmico de 100 nF antes de alimentar os dois sensores.
+-   Cada `OUT` de PIR vai ao GPIO por um resistor em série de 1 kΩ, com pull-down de 10 kΩ entre o GPIO e o GND.
+-   Cada sensor fica em um tubo impresso em PLA, para enxergar só o que está à sua frente.
+-   Convenção de sentido: **A** é o primeiro sensor cruzado ao entrar; **B**, ao sair.
 
 ----------
 
-## Visão geral da rede
+## Identidade das placas e papéis
 
-Cada instalação é composta por várias placas ESP32-C6 que rodam o mesmo firmware (as da rede), cada uma responsável por um ambiente, mais a placa da cortina. O fluxo é:
+Todas as placas rodam firmware a partir do mesmo código-fonte; cada uma descobre seu papel comparando o MAC de fábrica com a tabela `ESP[]` de `MAC.c`:
 
-1.  Ao ligar, cada ESP32 descobre **quem ele é** comparando seu MAC de fábrica com uma tabela fixa de dispositivos conhecidos (`MAC.c/h`).
-2.  Em seguida, conecta ao Wi-Fi e inicializa o ESP-NOW. As placas da rede conectam também ao broker MQTT; a placa da cortina **não** (`coms_init(false)`).
-3.  O laço principal (`main.c`) usa as duas vias:
-    -   **Intercom** — MQTT, para trocar dados com o ThingSpeak (publicar leituras, receber instruções e parâmetros).
-    -   **Intracom** — ESP-NOW, para receber a variação de ocupação da cortina e a mensagem de sincronização do `ESP0`.
-4.  Com base nos sensores locais, nas instruções do broker e pela estratégia de controle selecionada `controlers.c`, cada placa decide quando e como acionar o ar-condicionado do seu ambiente pelo `emiter.c`.
+| Índice (`ESP_Iam`) | Papel |
+|---|---|
+| 0 | Placa da rede, área do Ar 1 (dezena do alerta, `msgA` da instrução) |
+| 1 | Placa da rede, área do Ar 2 (unidade do alerta, `msgB` da instrução) |
+| 2 | Cortina PIR que envia ao `ESP0` |
+| 3 | Cortina PIR que envia ao `ESP1` |
+| 4 a 6 | Cadastradas, sem papel atribuído |
 
-----------
-
-## `temperature.c` / `temperature.h` — Sensor de temperatura DS18B20
-
-Lê a temperatura ambiente de um sensor DS18B20 conectado por **1-Wire**, um protocolo digital de um único fio onde o mestre (o ESP32) e o sensor se revezam controlando a linha, codificando informação na duração de cada pulso elétrico.
-
-O arquivo implementa o protocolo inteiro "na mão" (bit-banging), sem biblioteca externa:
-
--   **`pin_config`** — configura o GPIO como entrada/saída de dreno aberto (necessário porque o mesmo fio é usado tanto para escrever quanto para ler), com pull-up habilitado como reforço ao resistor externo de 4,7 kΩ.
--   **`t_wellnesscheck`** — executa o pulso de reset do 1-Wire e verifica se o sensor respondeu com o pulso de presença, dentro de uma seção crítica (`portENTER_CRITICAL`/`portEXIT_CRITICAL`) para garantir que o timing em microssegundos não seja interrompido pelo escalonador do RTOS.
--   **`t_write_bit` / `t_read_bit`** — escrevem ou leem um único bit, seguindo os tempos exatos que o datasheet do DS18B20 exige para cada "slot" de bit.
--   **`t_write_byte` / `t_read_byte`** — montam/desmontam um byte completo a partir de 8 chamadas às funções de bit, respeitando a ordem LSB-primeiro do protocolo.
--   **`confirm_Sdigit`** — calcula o checksum CRC-8 (padrão Maxim, polinômio `0x8C`) sobre os bytes recebidos e compara com o byte de checksum que o próprio sensor envia junto, para detectar corrupção na transmissão.
--   **`t_wake_up`** — envia os comandos que instruem o sensor a iniciar uma conversão de temperatura (o processo demora até ~800 ms na resolução padrão de 12 bits).
--   **`t_read_sensor`** — lê o "scratchpad" de 9 bytes do sensor, valida o CRC, descarta leituras corrompidas ou vazias, e converte os dois bytes de temperatura (em complemento de dois, escala 1/16 °C) para um `float` em graus Celsius.
-
-### API pública
-
-```c
-void DS18B20_init(void);
-bool DS18B20_read(float *out_celsius);
-
-```
-
-`DS18B20_init` configura o pino e testa a presença do sensor uma vez, no início do programa. `DS18B20_read` dispara a conversão, aguarda o tempo necessário e devolve a leitura via ponteiro, retornando `false` em caso de falha (sensor ausente, CRC inválido, etc.).
+A ordem importa: o broker lê os canais na ordem `ESP0`, `ESP1`, e a instrução e o alerta são posicionais.
 
 ----------
 
-## `humidity.c` / `humidity.h` — Sensor de temperatura e umidade DHT22
+## `main.c` — Ponto de entrada e coordenação (placas da rede)
 
-Lê temperatura e umidade de um sensor DHT22, também por bit-banging, mas com um protocolo próprio do fabricante (diferente do 1-Wire): a informação de cada bit é codificada pela **duração do nível alto** de um pulso, não pela alternância de nível como no DS18B20.
+Inicializa os módulos (`curtain_init`, `emiter_init`, `DHT22_init`, `DS18B20_init`, `coms_init(true)`; o LED fica âmbar enquanto conecta) e roda um laço a cada **200 ms**.
 
--   **`pin_config`** — mesma ideia do módulo de temperatura: pino em dreno aberto com pull-up.
--   **`bit_length`** — espera a linha atingir um nível específico e devolve quanto tempo (em microssegundos) isso levou, ou `-1` se estourar um timeout — usado tanto para sincronizar o início da comunicação quanto para medir a duração de cada bit.
--   **`h_read_data`** — executa a sequência de "acordar" o sensor, espera a resposta de presença (três transições de nível) e lê os 40 bits (5 bytes) do quadro de dados, decidindo bit a bit se a duração do nível alto correspondeu a um 0 (~26 µs) ou um 1 (~70 µs), usando 45 µs como limiar.
--   **`confirm_Sdigit`** — verificação de integridade mais simples que o CRC do DS18B20: soma os 4 primeiros bytes e compara com o 5º byte enviado pelo sensor como checksum.
--   Conversão dos valores: separa os 16 bits de umidade e os 16 bits de temperatura, dividindo por 10 para obter uma casa decimal; a temperatura usa o bit mais significativo como sinalizador de valor negativo (diferente do complemento de dois do DS18B20).
+### Estado principal
 
-### API pública
+| Variável | Papel |
+|---|---|
+| `data[6]` | `{DS18B20, DHT22 temperatura, DHT22 umidade, ocupação acumulada, alerta, setpoint calculado}`, publicado como `field1..field6` |
+| `ocupation` | Ocupação total ecoada pelo broker (`field6`); `NaN` até o primeiro eco. É a ocupação usada pelos controladores |
+| `pub1`, `pub2` | Os dois últimos valores de `data[3]` publicados |
+| `ControlType` | Controlador ativo (começa em `1`) |
+| `temp_alvo` | Temperatura-alvo vinda do broker |
+| `new_temp` / `last_temp` | Setpoint calculado pelo controlador / último setpoint transmitido com sucesso ao ar |
+| `broker_msg` | Mensagem do broker para esta placa (`9` = desligar o ar) |
+| `HVACon` | Se o ar está ligado, do ponto de vista do firmware |
+| `command` | Último dígito `F` da instrução |
+| `IRerror` / `COMSerror` | Falhas consecutivas de IR e de publicação MQTT |
+| `LastBrokerMsg` / `LastDataMngt` | Instantes (s) da última publicação e da última leitura de dados |
 
-```c
-void DHT22_init(void);
-bool DHT22_read(dht22_reading_t *out);
+### Temporização
 
-```
-
-`dht22_reading_t` é uma struct com dois campos (`temperature`, `humidity`), já que o sensor sempre lê os dois valores juntos em uma única transação.
-
-----------
-
-## `identify.cpp` / `identify.h` — Identificação e captura de sinais infravermelhos
-
-Módulo baseado na biblioteca `IRremoteIDF` (github de Jorgecis) que escuta continuamente o receptor IR (TSOP) e decodifica qualquer sinal recebido, imprimindo:
-
--   uma descrição legível do protocolo detectado;
--   se for um sinal de ar-condicionado suportado, um resumo dos parâmetros (modo, temperatura, ventilação etc.);
--   o código-fonte já pronto do sinal bruto capturado (útil para reproduzir o mesmo sinal depois).
-
-Diferente dos sensores, roda como uma **tarefa em loop infinito** (`identify_task`), porque não há como prever quando um sinal IR vai aparecer. É uma ferramenta de desenvolvimento, usada para capturar os timings do controle remoto original aplicados depois em `emiter.cpp`; o `main.c` atual **não** a inicializa.
-
-### API pública
-
-```c
-void identify_init(void);
-
-```
-
-----------
-
-## `emiter.cpp` / `emiter.h` — Emissor de comandos IR para o ar-condicionado
-
-O atuador principal do projeto: monta e transmite comandos infravermelhos que imitam o controle remoto de um ar-condicionado Philco, usando o protocolo **GOODWEATHER** e a classe `IRGoodweatherAc` da biblioteca `IRremoteIDF`.
-
-O `emiter.h` expõe uma API simplificada (`emiter_cmd_t`) com apenas os campos que o protocolo real possui — power, modo, temperatura, ventilação, oscilação da aleta e três "toggles" (turbo, luz do painel, sleep). Cada campo em zero/`*_KEEP` significa "não mexer nesse campo". Isso isola o resto do sistema dos detalhes internos da biblioteca.
-
-### Peças internas
-
--   **`native_mode` / `native_fan` / `native_swing`** — funções tradutoras que convertem os enums da API pública para as constantes que a biblioteca espera, validando se o valor pedido é suportado pelo protocolo.
--   **`validate`** — confere todos os campos de um comando antes de qualquer transmissão, incluindo a faixa de temperatura aceita pelo protocolo.
--   **`convert_to_LARA`** — monta e transmite manualmente o quadro IR completo (cabeçalho, 6 bytes cada um seguido do seu complemento de bits, e rodapé), usando **timings medidos diretamente do controle remoto real** via captura com o TSOP (módulo `identify`), em vez dos timings genéricos da biblioteca. Isso foi necessário porque os tempos padrão da biblioteca não batiam exatamente com o sinal do controle original.
--   **`send_frame`** — envia um frame único, respeitando uma pausa mínima (`interframe`) entre frames consecutivos de um mesmo comando.
--   **`send_temp`** — trata a mudança de temperatura, que no protocolo real não é um valor absoluto, mas sim os botões "Up"/"Down"; pode operar em modo de salto direto ou grau a grau (configurável em tempo de compilação via `temp_step`).
--   **`emiter_init`** — cria o objeto de estado do ar-condicionado e o objeto de envio de baixo nível, carregando como estado inicial o quadro exato capturado do controle remoto real (ligado, modo frio, 24 °C, ventilação automática, oscilação lenta).
--   **`send_ir_command`** — a função central: para cada campo preenchido em um comando, aplica a mudança no objeto de estado e transmite um frame, sempre na ordem liga → modo → temperatura → ventilação → oscilação → toggles → desliga, protegida por um mutex para que dois comandos nunca sejam processados ao mesmo tempo.
-
-Um detalhe importante do protocolo identificado: cada frame carrega o **estado completo** do ar-condicionado, não apenas o campo alterado — por isso o objeto interno precisa manter esse estado persistente entre chamadas.
-
-### API pública
-
-```c
-bool emiter_init(void);
-bool send_ir_command(const emiter_cmd_t *cmd);
-// Exemplo: send_ir_command(&(emiter_cmd_t){ .power = EMITER_ON });
-
-```
-
-----------
-
-## `curtain.c` / `curtain.h` — Ocupação nas placas da rede
-
-Recebe a variação de ocupação nas placas da rede, por duas entradas que alimentam a mesma variável:
-
-1.  **ESP-NOW**, vindo da placa da cortina (PIR hoje, CSI no futuro): a mensagem é um `float` em texto, `+x.0` para entradas e `-x.0` para saídas.
-2.  **Dois botões físicos**, como entrada manual (útil para testes e correções):
-3. 
-|Entrada | Efeito em `carga_termica` | LED |
-
+| Constante | Valor | Uso |
 |---|---|---|
+| `reading_interval` | 4 s | A partir de 4 s após a última publicação, cada volta do laço lê e aplica o que o broker enviou |
+| `data_interval` | 8 s | Ocupação, sensores, histórico e controlador |
+| `broker_interval` | 15 s | Publicação no canal da placa (mínimo do ThingSpeak) |
 
-| Botão do GPIO 7| Soma `1` | Vermelho (`255, 0, 0`) |
+### Ciclo do laço principal
 
-| Botão do GPIO 6 | Subtrai `1` | Azul (`0, 0, 255`) |
+1.  **Alertas de falha:** `IRerror ≥ 6` grava `6` em `data[4]`; `COMSerror ≥ 7` grava `7`. Os contadores voltam a zero.
+2.  **Despertar:** se a placa tem ocupação local (`data[3] > 0`), o broker vê a sala vazia ou ainda não respondeu (`ocupation` `0` ou `NaN`) e o ar está desligado, a placa liga o ar na hora (`power = EMITER_ON`), marca `HVACon` e grava o alerta `2`. Se o envio falhar, `HVACon` volta a `false` e a tentativa se repete na próxima volta.
+3.  **Leitura do broker** (de 4 s após a última publicação até a próxima):
+    -   `intercom_read_parameters()` atualiza `parameters[]` se chegou uma string nova.
+    -   **Ocupação** (`field6`): atualiza `ocupation`. Se ela for `≤ 0` **e** `data[3]` for igual aos dois últimos valores publicados, zera `data[3]`.
+    -   **Alerta** (`field8`): extrai o dígito desta placa (dezena para o `ESP0`, unidade para o `ESP1`). Se for igual ao alerta pendente em `data[4]`, o alerta foi recebido e `data[4]` volta a `0`.
+    -   **Instrução** (`field1`): decodifica `ABCDEF`; o `ESP0` e o `ESP1` atualizam `temp_alvo`, `ControlType` e `broker_msg` (`D` ou `E`).
+    -   Se `broker_msg == 9` e o ar está ligado, envia o desligamento; em caso de falha mantém `HVACon` e tenta de novo.
+    -   Se `new_temp` difere do último setpoint transmitido, envia a nova temperatura.
+4.  **Obtenção de dados** (a cada 8 s):
+    -   Soma `carga_termica` a `data[3]` e zera a caixa de correio. Se `data[3] ≤ −1000` (valor anormal), zera a ocupação e grava o alerta `8`.
+    -   Lê o DS18B20 e o DHT22. Em falha, grava valores padrão (24 °C; 24 °C e 55 %).
+    -   Desloca o histórico (`old_temps`), grava a ocupação do broker e a temperatura do DS18B20, roda o controlador ativo e guarda o resultado em `new_temp` e `data[5]`.
+5.  **Publicação** (15 s após a última): `intercom_send(data)`. Em sucesso, desloca `pub2 ← pub1 ← data[3]`, zera `command` e renova `LastBrokerMsg`.
 
-| Ambos os botões | Subtrai `900`, o que zera a ocupação (o `main.c` limita `data[3]` em `0`) | Roxo (`128, 0, 128`) |
+Os comandos ao ar são montados com `memset(&cmd, 0, sizeof(cmd))` e só os campos desejados são preenchidos, para que o resto fique em `*_KEEP`.
 
-Tudo roda na tarefa `curtain_task` (pilha de 6144 bytes, prioridade 1), por _polling_ a cada 20 ms (`poll`):
+### Ocupação: nível acumulado com confirmação por eco
 
-A variável `carga_termica` (agora `float`) funciona como uma **caixa de correio**: ela só carrega a variação de ocupação ocorrida desde a última leitura. O número de pessoas em si fica em `data[3]`, no `main.c`, que a cada `data_interval` (8 s) soma `carga_termica` a `data[3]`, limita o resultado em no mínimo `0` e zera a caixa.
+`data[3]` não é o número de pessoas da área: é o **saldo** de entradas e saídas da porta daquela placa desde o último zeramento, e pode ser negativo (quem entra por uma porta pode sair pela outra). O broker soma os saldos das duas placas e limita o total em `0`.
 
-`curtain_init` configura os dois botões como entrada com pull-up, chama `led_init()` (que mora em `PIRcurtain.c`) e cria a tarefa.
+Publicar um nível em vez de um delta faz com que a placa possa publicar várias vezes entre duas execuções do broker sem perder ou duplicar eventos. O zeramento só acontece quando o broker diz que a sala está vazia **e** o saldo local não mudou nas duas últimas publicações, ou seja, o broker já o contabilizou.
 
-### API pública
+### Alertas (`data[4]`)
 
-```c
-extern float carga_termica;
-void curtain_init(void);
+`data[4]` é um único slot: o alerta mais recente substitui o anterior. Ele é publicado em `field5`, o broker o ecoa em `field8` (`ESP0·10 + ESP1`) e a placa o zera ao ver o próprio dígito no eco.
 
-```
+| Código | Origem | Significado |
+|---|---|---|
+| 2 | Despertar | O ar foi ligado por entrada de pessoa com a sala vazia |
+| 6 | `IRerror ≥ 6` | Falhas repetidas de envio IR |
+| 7 | `COMSerror ≥ 7` | Falhas repetidas de publicação MQTT |
+| 8 | `data[3] ≤ −1000` | Ocupação anormal; o broker considera a ocupação total `0` |
+
+### Sinais do LED (placas da rede)
+
+| Cor | Evento |
+|---|---|
+| Âmbar fixo | Inicialização e conexão |
+| Branco (piscada) | Comando IR enviado com sucesso |
+| Magenta (piscada) | Instrução do broker recebida |
+| Verde (piscada) | Publicação no broker |
+| Vermelho / azul / roxo (piscada) | Botão 7 / botão 6 / os dois (`curtain.c`) |
+
+Cada piscada bloqueia por 400 ms a tarefa que a chamou.
 
 ----------
 
 ## `controlers.c` / `controlers.h` — Controladores de temperatura
 
-Calculam, a cada `data_interval` (8 s), a **temperatura de setpoint a enviar ao ar-condicionado** a partir da temperatura medida, da ocupação e da temperatura-alvo pedida pelo operador. O resultado é um valor em °C (`new_temp`, no `main.c`). Ele só vai por IR quando difere do último enviado, no bloco de 17 s do laço principal.
+Calculam, a cada 8 s, o **setpoint a enviar ao ar-condicionado** a partir da temperatura medida, da ocupação ecoada pelo broker e da temperatura-alvo. O valor só vai por IR quando difere do último transmitido.
 
-A ideia comum a todos: o ar-condicionado tem seu próprio termostato, que desarma ao atingir o setpoint do controle remoto. Os controladores movem esse setpoint para baixo quando a sala está quente (forçando o ar a trabalhar) e para cima quando está confortável ou vazia (economizando energia).
+A ideia comum: o ar tem seu próprio termostato, que desarma ao atingir o setpoint do controle remoto. Os controladores baixam esse setpoint quando a sala está quente (o ar trabalha mais) e o sobem quando está confortável ou vazia (economia).
+
+Todos têm a mesma interface, `float f(float Ocupacao, float temp_alvo)`.
 
 | Controlador | `ControlType` | Usa ocupação | Usa histórico | Resumo |
 |---|---|---|---|---|
-| `LigaDesliga` | 1 | Não | Só a amostra atual | Liga/desliga com histerese entre dois setpoints fixos |
+| `LigaDesliga` | 1 | Não | Só a amostra atual | Alterna entre dois setpoints fixos com histerese |
 | `ControlPI` | 2 | Não | Sim (integral) | Proporcional + integral sobre o erro de temperatura |
 | `ControlAdap` | 3 | Sim | Sim (duas integrais) | PI + compensação por pessoa, com ganho que se adapta |
 | `Step` | 4 | Não | Não | Alterna entre setpoint mínimo e máximo em ciclo fixo |
+| `Direct` | 5 | Não | Não | Envia a temperatura-alvo diretamente |
+| outro | — | — | — | O `main.c` imprime aviso e usa `LigaDesliga` |
 
 ### Histórico (`old_temps`)
 
-`old_temps[2][HIST_LEN]` guarda as últimas leituras, uma por `data_interval`:
+-   `old_temps[HIST_OCUP]` (linha 0) guarda a ocupação do broker e `old_temps[HIST_TEMP]` (linha 1) a temperatura do DS18B20.
+-   O índice `0` é a amostra **mais recente**; o `main.c` desloca os vetores com `memmove` antes de gravar a nova.
+-   Tudo começa em `NaN`, e amostras `NaN` são ignoradas.
+-   `HIST_DT_S = 8` e `HIST_LEN = 120 · (60/8 + 1) = 960` amostras. Como `60/8` é divisão inteira (7), isso cobre 960 × 8 s = **128 min**, a maior janela disponível.
 
-- `old_temps[HIST_OCUP]` (linha 0) guarda a ocupação e `old_temps[HIST_TEMP]` (linha 1) guarda a temperatura do DS18B20 (`data[0]`).
-- O índice `0` é a amostra **mais recente**. O `main.c` desloca os dois vetores uma posição (`memmove`) antes de gravar a amostra nova.
-- Tudo começa em `NaN`, e amostras `NaN` são ignoradas nos cálculos.
-- `HIST_DT_S = 8` s e `HIST_LEN = 120 * (60/8 + 1) = 960` amostras. Como `60/8` é divisão inteira (7), isso dá 960 × 8 s = **128 min**, e não 120. É a maior janela que os controladores conseguem usar.
+### Parâmetros
 
-### Parâmetros usados
-
-Todos vêm de `parameters[]` (ver `coms.c`) e podem ser trocados remotamente pelo broker.
+Vêm de `parameters[]` (ver `coms.c`) e podem ser trocados remotamente pelo broker.
 
 | Índice | Macro | Padrão | Significado |
 |---|---|---|---|
-| 0 | `SET_MIN` | 20 | Menor setpoint que pode ser enviado ao ar (°C) |
-| 1 | `SET_MAX` | 26 | Maior setpoint que pode ser enviado ao ar (°C) |
-| 2 | `SET_PADRAO` | 23 | Setpoint usado quando não há leitura de temperatura nem setpoint anterior válido |
+| 0 | `SET_MIN` | 20 | Menor setpoint enviado ao ar (°C) |
+| 1 | `SET_MAX` | 26 | Maior setpoint enviado ao ar (°C) |
+| 2 | `SET_PADRAO` | 23 | Setpoint sem leitura de temperatura nem setpoint anterior válido |
 | 3 | `LD_BANDA` | 0,3 | Meia-banda da histerese do Liga/Desliga (°C) |
-| 4 | `LD_SET_FRIO` | 20 | Setpoint enviado pelo Liga/Desliga enquanto "resfria" |
-| 5 | `LD_SET_OCIOSO` | 26 | Setpoint enviado pelo Liga/Desliga quando "ocioso" |
+| 4 | `LD_SET_FRIO` | 20 | Setpoint do Liga/Desliga ao resfriar |
+| 5 | `LD_SET_OCIOSO` | 26 | Setpoint do Liga/Desliga ocioso |
 | 6 | `PI_KP` | 1,0 | Ganho proporcional (°C de setpoint por °C de erro) |
-| 7 | `PI_TI` | 15 | Tempo integral, em minutos (`PI_KI = PI_KP / PI_TI`) |
-| 8 | `PI_JANELA` | 30 | Janela da integral do PI, em minutos |
+| 7 | `PI_TI` | 15 | Tempo integral, em min (`PI_KI = PI_KP / PI_TI`) |
+| 8 | `PI_JANELA` | 30 | Janela da integral, em min |
 | 9 | `PI_IMAX` | 3,0 | Limite da contribuição integral (°C), anti-*windup* |
-| 10 | `AD_TREF_VAZIA` | 27 | Temperatura de referência do Adaptativo com a sala vazia |
-| 11 | `AD_KFF0` | 0,25 | Ganho inicial por pessoa (°C de setpoint por pessoa) |
+| 10 | `AD_TREF_VAZIA` | 27 | Referência do Adaptativo com a sala vazia |
+| 11 | `AD_KFF0` | 0,25 | Ganho inicial por pessoa (°C por pessoa) |
 | 12 | `AD_GAMMA` | 0,002 | Taxa de adaptação do ganho por pessoa |
-| 13 | `AD_JAN_AD` | 120 | Janela de adaptação do ganho, em minutos |
+| 13 | `AD_JAN_AD` | 120 | Janela de adaptação do ganho, em min |
 | 14 | `AD_KFF_MAX` | 1,0 | Teto do ganho por pessoa |
-| 15 | `CORR_ACIMA` | 0,3 | Erro (°C) acima do alvo a partir do qual se força o setpoint mínimo |
+| 15 | `CORR_ACIMA` | 0,3 | Erro (°C) a partir do qual se força `SET_MIN` |
 | 16 | `CORR_ABAIXO` | −0,2 | Erro (°C) abaixo do qual a correção é liberada |
-| 17 | `STEP_LIGADO_S` | 10800 | Duração do patamar "mínimo" do Degrau, em s (3 h) |
-| 18 | `STEP_CICLO_S` | 14400 | Período total do Degrau, em s (4 h) |
-| 19 | — | 0 | Não usado em `controlers.c` |
-
-Como a string do broker carrega 3 dígitos por parâmetro e os índices 17 e 18 têm escala 3600, o broker envia esses dois em **horas** (`003` e `004`).
+| 17 | `STEP_LIGADO_S` | 10800 | Duração do patamar mínimo do Degrau (s) |
+| 18 | `STEP_CICLO_S` | 14400 | Período do Degrau (s) |
+| 19 | — | 0 | Reservado |
 
 ### Funções auxiliares
 
-- **`clampf`** — limita um valor a um intervalo.
-- **`janela(minutos)`** — converte uma janela em minutos para número de amostras (`minutos·60/8 + 1`), limitada a `HIST_LEN`.
-- **`finaliza(v)`** — limita o setpoint a `[SET_MIN, SET_MAX]`, **arredonda para inteiro** (o ar só aceita passos de 1 °C), guarda em `ultimo_setp` e devolve.
-- **`setp_anterior_valido`** — devolve `ultimo_setp` se for válido e estiver dentro dos limites; senão, `SET_PADRAO`. É o recurso usado quando falta leitura de temperatura.
-- **`integral_hist(n, ref, pesar_ocup, &out)`** — integra pela regra do trapézio, da amostra mais antiga das `n` até a mais recente, o erro `(T − ref)`. Com `pesar_ocup`, multiplica cada erro pela ocupação (sempre ≥ 0; se uma amostra de ocupação for `NaN`, vale a última conhecida). O resultado está em °C·min (ou °C·pessoa·min). Devolve `false` se houver menos de 2 amostras válidas.
-- **`corrige_compressor(erro)`** — histerese que decide se o controlador deve forçar o setpoint mínimo (ar a toda). Devolve `true` (forçar) quando o erro é ≥ `CORR_ACIMA`, ou quando o erro está entre `CORR_ABAIXO` e `CORR_ACIMA` **e** o último setpoint já era `SET_MIN`. Ou seja: uma vez forçado, o ar continua no mínimo até a sala esfriar `|CORR_ABAIXO|` °C abaixo do alvo; só então o controlador volta ao cálculo normal. Pelo nome, a intenção é manter o compressor trabalhando em vez de ciclar perto do alvo.
+-   **`clampf`** — limita um valor a um intervalo.
+-   **`janela(minutos)`** — converte minutos em número de amostras (`minutos·60/8 + 1`), limitado a `HIST_LEN`.
+-   **`finaliza(v)`** — limita a `[SET_MIN, SET_MAX]`, **arredonda para inteiro** (o ar só aceita passos de 1 °C), guarda em `ultimo_setp` e devolve.
+-   **`setp_anterior_valido`** — `ultimo_setp` se válido e dentro dos limites; senão `SET_PADRAO`.
+-   **`integral_hist(n, ref, pesar_ocup, &out)`** — integra pela regra do trapézio, da mais antiga das `n` amostras até a mais recente, o erro `(T − ref)`; com `pesar_ocup`, multiplica cada erro pela ocupação (≥ 0; amostra `NaN` herda a última conhecida). Resultado em °C·min (ou °C·pessoa·min). Devolve `false` com menos de 2 amostras válidas.
+-   **`corrige_compressor(erro)`** — histerese que força `SET_MIN`: devolve `true` quando o erro é `≥ CORR_ACIMA`, ou quando está acima de `CORR_ABAIXO` e o último setpoint já era `SET_MIN`. Uma vez forçado, o ar fica no mínimo até a sala esfriar `|CORR_ABAIXO|` abaixo do alvo, evitando que o compressor cicle perto do alvo.
 
 ### Os controladores
 
-#### `LigaDesliga(ocupação, temp_alvo)`
+#### `LigaDesliga`
 
-Ignora a ocupação. Mantém um estado "resfriando" com histerese em torno do alvo:
+O estado "resfriando" é deduzido do último setpoint (`ultimo_setp ≠ LD_SET_OCIOSO`, ou nenhum ainda):
 
 ```
 T >= alvo + LD_BANDA  ->  resfriando = true
 T <= alvo - LD_BANDA  ->  resfriando = false
-(entre os dois, ou T desconhecida, mantém o estado anterior)
+(entre os dois, ou T desconhecida, mantém o estado)
 
 setpoint = resfriando ? LD_SET_FRIO : LD_SET_OCIOSO
 ```
 
-O ar-condicionado continua ligado: o que muda é o setpoint (20 °C ou 26 °C pelos padrões). Esses dois valores **não** passam pelo limite `[SET_MIN, SET_MAX]` de `finaliza`.
+O ar continua ligado; o que muda é o setpoint. Esses dois valores não passam por `finaliza`.
 
-#### `ControlPI(ocupação, temp_alvo)`
+#### `ControlPI`
 
-Ignora a ocupação. Sem leitura de temperatura, repete o setpoint anterior válido. Com leitura:
+Sem leitura de temperatura, repete o setpoint anterior válido. Com leitura:
 
 1. Se `corrige_compressor(T − alvo)`, devolve `SET_MIN`.
-2. Calcula a integral `I` do erro `(T − alvo)` na janela `PI_JANELA` (sem peso de ocupação) e a limita a `±PI_IMAX/PI_KI`, de modo que `PI_KI·I` nunca passe de `PI_IMAX`.
+2. Integra `(T − alvo)` na janela `PI_JANELA` e limita a integral a `±PI_IMAX/PI_KI`.
 3. `delta = PI_KP·(T − alvo) + PI_KI·I`
 4. Setpoint = `finaliza(alvo − delta)`.
 
-Sala acima do alvo gera `delta` positivo, que baixa o setpoint e faz o ar trabalhar mais.
+#### `ControlAdap`
 
-#### `ControlAdap(ocupação, temp_alvo)`
+PI com um termo proporcional ao número de pessoas (*feedforward*) cujo ganho se ajusta sozinho:
 
-É o PI com um termo proporcional ao número de pessoas (*feedforward*) cujo ganho se ajusta sozinho:
+1. **Ocupação**: a atual; se `NaN`, a última do histórico; se continuar desconhecida, vale 0 sem ser tratada como sala vazia.
+2. **Ganho**: `kff = AD_KFF0 + AD_GAMMA·Ikff`, onde `Ikff` é a integral, na janela `AD_JAN_AD`, de `(T − alvo)` **ponderado pela ocupação**. Limitado a `[0, AD_KFF_MAX]`; com poucos dados vale `AD_KFF0`.
+3. **Sala vazia** (ocupação conhecida e igual a 0): a referência passa a `AD_TREF_VAZIA` e a correção forçada é pulada.
+4. Fora disso, `corrige_compressor(T − Tref)` pode devolver `SET_MIN`.
+5. `delta = PI_KP·(T − Tref) + PI_KI·I + kff·ocupação`, com `I` como no PI.
+6. Setpoint = `finaliza(Tref − delta)`.
 
-1. **Ocupação**: usa a atual; se for `NaN`, a última do histórico; se continuar desconhecida, assume 0 e não considera a sala vazia.
-2. **Ganho adaptativo**: `kff = AD_KFF0 + AD_GAMMA·Ikff`, onde `Ikff` é a integral, na janela `AD_JAN_AD`, do erro `(T − alvo)` **ponderado pela ocupação**. Se a sala esquentou com gente dentro, o ganho sobe; se esfriou, desce. O resultado é limitado a `[0, AD_KFF_MAX]`. Com poucos dados, vale `AD_KFF0`.
-3. **Sala vazia** (ocupação conhecida e igual a 0): a referência passa de `alvo` para `AD_TREF_VAZIA` e a correção forçada de `SET_MIN` é pulada.
-4. Fora da sala vazia, aplica `corrige_compressor(T − Tref)` e devolve `SET_MIN` se ela pedir.
-5. Calcula `I` (janela `PI_JANELA`, referência `Tref`, sem peso de ocupação), limitado como no PI.
-6. `delta = PI_KP·(T − Tref) + PI_KI·I + kff·ocupação`
-7. Setpoint = `finaliza(Tref − delta)`.
+Com ocupação `0`, o broker só manda desligar o ar no controlador Direto. No Adaptativo, o ramo de sala vazia atua enquanto a sala estiver vazia, com o vetor de parâmetros da sala vazia (ver abaixo).
 
-Com a sala vazia, `Tref` (27 °C) fica acima de `SET_MAX` (26 °C), então o resultado costuma ser limitado em `SET_MAX`. Com o controlador Adaptativo ativo e ocupação `0`, o broker manda também desligar o ar-condicionado (ver o broker ThingSpeak). O ramo "sala vazia" só atua no intervalo antes de essa instrução ser aplicada.
-
-#### `Step(ocupação, temp_alvo)`
-
-Ignora os dois argumentos. Usa o tempo desde a inicialização (`esp_timer_get_time()` em segundos) módulo `STEP_CICLO_S`:
+#### `Step`
 
 ```
-t = tempo_s % STEP_CICLO_S
+t = (segundos desde o boot) % STEP_CICLO_S
 setpoint = (t < STEP_LIGADO_S) ? SET_MIN : SET_MAX
 ```
 
-Pelos padrões: 3 h em 20 °C seguidas de 1 h em 26 °C, repetindo. A fase do ciclo depende do instante em que a placa foi ligada. Serve para ensaios de resposta ao degrau, e é por isso que não tem campo de gasto energético no painel.
+Pelos padrões: 3 h em 20 °C e 1 h em 26 °C, repetindo. A fase depende de quando a placa ligou. Serve para os ensaios em degrau usados na modelagem do ambiente.
+
+#### `Direct`
+
+Devolve `finaliza(temp_alvo)`: o setpoint pedido pelo operador, limitado a `[SET_MIN, SET_MAX]` e arredondado.
 
 ### Estado interno
 
-`ultimo_setp` é uma variável única, **compartilhada entre os controladores**. Ao trocar de controlador, o novo parte do último setpoint calculado pelo anterior. Por isso a histerese de `corrige_compressor` pode herdar um `SET_MIN` de outro controlador.
+`ultimo_setp` é **compartilhado entre os controladores**. Ao trocar de controlador, o novo parte do último setpoint do anterior, e a histerese de `corrige_compressor` pode herdar um `SET_MIN`.
 
 ### API pública
+
 ```c
-#define HIST_DT_S  8
-#define HIST_LEN   (120 * (60 / HIST_DT_S + 1))
-#define HIST_OCUP  0
-#define HIST_TEMP  1
+#define HIST_DT_S 8
+#define HIST_LEN (120 * (60 / HIST_DT_S + 1))
+#define HIST_OCUP 0
+#define HIST_TEMP 1
 extern float old_temps[2][HIST_LEN];
 
 float LigaDesliga(float Ocupacao, float temp_alvo);
 float ControlPI(float Ocupacao, float temp_alvo);
 float ControlAdap(float Ocupacao, float temp_alvo);
 float Step(float Ocupacao, float temp_alvo);
-```
-
-----------
-
-## `PIRcurtain.c` / `PIRcurtain.h` — Cortina PIR (placa da cortina) e LED
-
-A cortina PIR é um **placeholder** da cortina final baseada em CSI, desenvolvida em projeto paralelo por Guilherme França. Até a cortina CSI ficar pronta, ela fornece à rede o mesmo tipo de informação que a final vai fornecer, porém com confiabilidade drasticamente inferior. É administrada por **ESPs externos à rede**, que só enviam a variação de ocupação por ESP-NOW; o `main.c` dessa placa é apenas:
-
-```c
-void app_main(void)
-{
-    PIRcurtain_init();
-}
-
-```
-
-Nas **placas da rede**, `PIRcurtain_init` não é chamada: o arquivo só entra no firmware como fornecedor das funções de LED (`led_init`, `led_set`, `led_blink`) usadas pelo `curtain.c`.
-
-### Hardware e ligações
-
--   Fonte de **5 V** nos pinos 5V e GND da ESP32-C6. As trilhas passam primeiro por um capacitor **eletrolítico** de 100 µF e em seguida por um **cerâmico** de 100 nF entre 5 V e GND, e só depois alimentam os dois sensores PIR.
--   Cada `OUT` de PIR vai ao GPIO por um **resistor em série de 1 kΩ**, com um **pull-down de 10 kΩ** entre o GPIO e o GND.
--   Cada sensor fica em um **tubo impresso em PLA**, para enxergar apenas o que está diretamente à sua frente.
--   Convenção de sentido: **A** é o primeiro sensor cruzado ao entrar; **B**, ao sair.
-
-### Inicialização (`PIRcurtain_init`)
-
-1.  `led_init()` — cria o objeto do LED RGB integrado.
-2.  `coms_init(false)` — comunicação **sem MQTT**: só ESP-NOW (`intracom`). A tabela `ESP[]` identifica a placa e lista os destinatários.
-3.  Cria a fila `fila` (8 eventos).
-4.  Configura os GPIO 4 e 5 como entrada, com pull-down interno e **interrupção na borda de subida**.
-5.  Instala o serviço de interrupção e registra `isr_sensor` nos dois pinos (identificador `0` para A, `1` para B).
-6.  Cria a tarefa `monitora_psg` (`"passagem"`, pilha de 4096 bytes, prioridade 5).
-
-### Aquecimento
-
-O HC-SR501 pode gerar disparos espúrios logo depois de ligado. Por isso a tarefa espera 500 ms e entra em **60 s de aquecimento**: o LED pisca em âmbar (`60, 20, 0`), o terminal mostra a contagem regressiva em uma única linha (sequências de escape ANSI) e a fila é esvaziada a cada segundo. No fim o LED apaga e a tarefa imprime `Monitorando`.
-
-### Detecção e sentido
-
-Depois do aquecimento, a tarefa funciona em ciclos:
-
-1.  Espera, sem limite de tempo, o **primeiro evento** (borda de subida em A ou B).
-2.  Espera até `janela` (1500 ms) por um **segundo evento**, que só confirma a passagem se vier do **outro** sensor.
-3.  Decide o sentido pela ordem em que os sensores dispararam.
-4.  Espera `bloqueio` (1000 ms) e esvazia a fila antes de aceitar nova detecção.
-
-|Situação | Resultado| LED | ESP-NOW |
-
-|---|---|---|
-
-| A primeiro, B confirma na janela | Entrada |Vermelho (`60, 0, 0`) | Envia `+1.0` |
-
-| B primeiro, A confirma na janela | Saída | Azul (`0, 0, 60`) | Envia `-1.0` |
-
-| Só um sensor na janela | Sem sentido | Verde (`0, 60, 0`) | Nada |
-
-Os instantes das bordas são medidos dentro da própria interrupção com `esp_timer_get_time()` (µs), então o intervalo impresso não depende do escalonamento da tarefa. O envio é `intracom_send(&direcao, -1)`, onde o `-1` significa **todos** os ESPs da tabela `ESP[]`. Só passagens confirmadas pelos dois sensores geram mensagem.
-
-### Funções de LED
-
-O LED integrado não é um GPIO liga/desliga, e sim um dispositivo endereçável WS2812 com protocolo próprio, controlado pelo componente `led_strip` (formato GRB, 1 LED, RMT a 10 MHz).
-
--   **`led_init`** — cria o dispositivo. Se falhar, o motivo vai para `error_code`, é impresso com o prefixo `curtain:` e o LED fica desativado: as demais funções de LED passam a não fazer nada e o resto do firmware segue normalmente.
--   **`led_set(ligado, r, g, b)`** — acende com a cor indicada ou apaga.
--   **`led_blink(r, g, b)`** — acende por `blink` ms e apaga, bloqueando a tarefa que a chamou.
-
-### Contrato com a cortina
-
-O que o `curtain.c` espera receber, e portanto o que qualquer cortina precisa enviar:
-| Item | Valor |
-|---|---|
-| Meio | ESP-NOW (`intracom`), a todos os ESPs da rede |
-| Formato | Um `float` em texto, no formato do `%f` (por exemplo `"1.000000"`) |
-| Significado | Variação de ocupação: positivo = entrada, negativo = saída |
-| Cortina PIR | Sempre `+1.0` ou `-1.0` |
-| Valores reservados | Acima de `100`; a sincronização entre ESPs usa `101` |
-
-### API pública
-
-```c
-void PIRcurtain_init(void);
-void led_init(void);
-void led_blink(int r, int g, int b);
-void led_set(bool ligado, int r, int g, int b);
-
-```
-
-----------
-
-## `MAC.c` / `MAC.h` — Identidade do dispositivo
-
-Resolve um problema comum em sistemas com múltiplas placas idênticas rodando o mesmo firmware: **como cada ESP32 sabe qual é o seu papel** na rede, sem precisar gravar um firmware diferente para cada uma?
-
-A solução usada aqui é uma tabela fixa, escrita no código, que associa o **endereço MAC de fábrica** de cada placa (único e imutável por dispositivo) a um índice/papel na rede:
-
-```c
-typedef struct {
-    int com;
-    uint8_t mac[6];
-    bool Iam;
-} ESP_t;
-
-```
-
--   `mac` — o endereço MAC de 6 bytes daquele ESP específico.
--   `com` — um identificador numérico associado a esse dispositivo (por exemplo, um número de sala ou de nó).
--   `Iam` — marcado como `true` para a entrada que corresponde ao dispositivo que está rodando o código agora.
-
-A tabela `ESP[]`, em `MAC.c`, lista os MACs de **todos** os ESP32 conhecidos da instalação, **inclusive a placa da cortina**, que precisa constar nela para trocar mensagens por ESP-NOW.
-
-**`mac_init()`** lê o MAC de fábrica do dispositivo atual (`esp_read_mac`, usando a interface Wi-Fi como referência), percorre a tabela `ESP[]` procurando uma correspondência exata, e:
-
--   marca `Iam = true` na entrada correspondente;
--   guarda o índice encontrado na variável global `ESP_Iam` (ou deixa em `-1` se o MAC não constar na tabela — ou seja, uma placa "desconhecida" rodando o firmware).
-
-`NUM_ESPS` é calculado automaticamente a partir do tamanho do array, então adicionar ou remover dispositivos da tabela não exige atualizar nenhum número manualmente. (O tamanho das tabelas de credenciais em `MQTT.h`, `ESPS_NUM`, precisa acompanhar esse número.)
-
-`discover_mac()` é uma função auxiliar de depuração que apenas imprime o MAC de fábrica do dispositivo, útil para descobrir o endereço de uma placa nova antes de cadastrá-la na tabela `ESP[]`.
-
-### API pública
-
-```c
-extern const int NUM_ESPS;
-extern ESP_t ESP[];
-extern int ESP_Iam;
-void mac_init(void);
-void discover_mac(void);
-
+float Direct(float Ocupacao, float temp_alvo);
 ```
 
 ----------
 
 ## `coms.c` / `coms.h` — Conectividade e troca de mensagens
 
-Concentra toda a configuração de rede (Wi-Fi, MQTT, ESP-NOW) e expõe funções simples para enviar/receber dados, escondendo os detalhes de cada protocolo do resto do programa.
+Concentra Wi-Fi, MQTT e ESP-NOW e expõe funções simples de envio e leitura.
 
 ### Inicialização (`coms_init(bool all)`)
 
-O parâmetro escolhe o modo:
-
 -   **`all = true`** (placas da rede): Wi-Fi + MQTT + ESP-NOW.
--   **`all = false`** (placa da cortina): Wi-Fi + ESP-NOW, **sem MQTT**.
+-   **`all = false`** (cortinas): Wi-Fi + ESP-NOW, sem MQTT.
 
-Em sequência:
+Sequência:
 
-1.  `nvs_flash_init()` — armazenamento não volátil, exigido internamente pelo driver de Wi-Fi.
-2.  `mac_init()` — descobre a identidade do dispositivo.
-3.  `credentials_init()` — carrega, a partir da tabela `MQTT` de `MQTT.h`, as credenciais do dispositivo, indexadas por `ESP_Iam`.
-4.  Configura e conecta o Wi-Fi em modo estação (`WIFI_MODE_STA`), com economia de energia desligada (`WIFI_PS_NONE`), aguardando bloqueado até obter IP. No modo `all`, define também o hostname da interface.
-5.  **Só no modo `all`:** configura e conecta o cliente MQTT, aguardando bloqueado a confirmação.
-6.  Monta a lista de "slaves" do ESP-NOW — todos os ESPs da tabela `ESP[]` exceto o próprio — e registra cada um como _peer_, permitindo envio direto sem roteador.
+1.  `nvs_flash_init()`, exigido pelo driver de Wi-Fi.
+2.  `mac_init()` e `credentials_init()`.
+3.  Wi-Fi em modo estação, com economia de energia desligada (`WIFI_PS_NONE`), bloqueando até obter IP. No modo `all`, define também o hostname.
+4.  **Só no modo `all`:** cliente MQTT, bloqueando até conectar.
+5.  ESP-NOW: monta a lista `slaves` com todas as placas da tabela exceto a própria, registra cada uma como _peer_, cria o semáforo de envio e registra os callbacks.
 
-### Callbacks de evento
+### Callbacks
 
--   **`event_handler`** — Wi-Fi: inicia a conexão quando a interface sobe, marca como conectado ao obter IP e reconecta automaticamente em caso de queda.
--   **`mqtt_event_handler`** — MQTT: ao conectar, inscreve-se em **dois tópicos**, `MQTTsub` (instruções) e `MQTTpar` (parâmetros). Ao receber dados, separa pelo tópico: o de `MQTTpar` vai para `mqtt_parameters` (até 64 caracteres) e o resto para `mqtt_received` (até 20). Também registra desconexão e erros.
--   **`receive_msg`** — ESP-NOW: copia a mensagem recebida para o buffer `received_msg` (20 caracteres). Guarda só a **última** mensagem.
+-   **`event_handler`** (Wi-Fi): conecta quando a interface sobe, marca conectado ao obter IP e reconecta em caso de queda.
+-   **`mqtt_event_handler`**: ao conectar, assina cinco tópicos do canal do broker e separa as mensagens recebidas por tópico em buffers próprios:
 
-### Funções de envio/recebimento
+| Tópico (`MQTT.h`) | Field do broker | Buffer | Leitura |
+|---|---|---|---|
+| `MQTTsub` | 1 — instrução | `mqtt_received` | `intercom_read` |
+| `MQTTpar` | 2 — parâmetros | `mqtt_parameters` | `intercom_read_parameters` |
+| `MQTTocpt` | 6 — ocupação total | `mqtt_ocpt` | `intercom_ocupation` |
+| `MQTTtime` | 7 — instante | `mqtt_time` | `intercom_timestamp` |
+| `MQTTwarn` | 8 — eco dos alertas | `mqtt_warn` | `intercom_warnings` |
+
+-   **`receive_msg`** (ESP-NOW): copia a mensagem para `received_msg`; guarda só a última.
+-   **`send_result`** (ESP-NOW): grava se o envio teve ACK e libera o semáforo.
+
+### Funções
 
 | Função | Via | Propósito |
 |---|---|---|
-| `intercom_send(data)` | MQTT | Publica `data[0..4]` como `field1=…&field2=…&field3=…&field4=…&field5=…` (uma casa decimal), formato do ThingSpeak, no tópico `MQTTpub` (QoS 1). Devolve `false` se o MQTT não estiver conectado. |
-| `wake_up(data)` | MQTT | Publica no mesmo formato, mas no tópico `MQTT.pub[0]` (o do `ESP0`). Existe, mas o `main.c` atual não a chama. |
-| `intercom_read(out)` | MQTT | Copia a última instrução recebida para o chamador e limpa o buffer. Devolve `true` se havia mensagem. |
-| `intercom_read_parameters()` | MQTT | Decodifica a última string de parâmetros recebida e atualiza `parameters[]` (ver abaixo). |
-| `intracom_send(data, slave_index)` | ESP-NOW | Envia **um** `float` (como texto `%f`) a um ESP específico (`slave_index`) ou a todos (`-1`). Devolve `false` se algum envio falhar. |
-| `intracom_read(out_msg)` | ESP-NOW | Copia a última mensagem local recebida e limpa o buffer. Devolve `true` se havia mensagem. |
+| `intercom_send(data)` | MQTT | Publica `data[0..5]` como `field1=…&…&field6=…` (uma casa decimal) no tópico da placa, QoS 1. Devolve `false` sem conexão MQTT |
+| `intercom_read(out)` | MQTT | Copia a última instrução e limpa o buffer; `true` se havia mensagem |
+| `intercom_ocupation(out)` | MQTT | Idem, para a ocupação |
+| `intercom_warnings(out)` | MQTT | Idem, para o alerta |
+| `intercom_timestamp(out)` | MQTT | Idem, para o instante (não usado pelo `main.c` atual) |
+| `intercom_read_parameters()` | MQTT | Decodifica a string de parâmetros (abaixo) |
+| `intracom_send(data, slave_index)` | ESP-NOW | Envia um `float` como texto (`%f`) a uma placa de `slaves` ou a todas (`-1`). Para cada envio, espera o ACK por até 70 ms; devolve `true` só se todos tiveram `ESP_NOW_SEND_SUCCESS` |
+| `intracom_read(out_msg)` | ESP-NOW | Copia a última mensagem recebida e limpa o buffer |
+| `wake_up(data)` | MQTT | Publica 5 fields no tópico do `ESP0` (não usada pelo `main.c` atual) |
 
-### Parâmetros remotos — `parameters[20]` e `intercom_read_parameters`
+### Parâmetros remotos — `parameters[20]`
 
-`parameters[]` é um vetor global de 20 `float` que guarda os parâmetros ajustáveis dos controladores. Começa com valores padrão compilados e pode ser **substituído remotamente** por uma string de 60 dígitos publicada pelo broker no tópico `MQTTpar` (3 dígitos por parâmetro, multiplicados por uma escala por posição).
-
-A função ignora a string se estiver vazia, tiver mais de 60 caracteres, for igual à anterior ou tiver caractere que não seja dígito. Strings curtas são completadas com zeros à esquerda até 60. Cada grupo de 3 dígitos vira `raw × escala`:
+Começam com os valores padrão compilados e podem ser substituídos por uma string de **60 dígitos** (20 grupos de 3) publicada pelo broker. A string é ignorada se estiver vazia, tiver mais de 60 caracteres, for igual à anterior ou tiver algo que não seja dígito; strings curtas são completadas com zeros à esquerda. Cada grupo vira `raw × escala`:
 
 | Índice | Padrão | Escala | Índice | Padrão | Escala |
 |---|---|---|---|---|---|
@@ -564,7 +401,29 @@ A função ignora a string se estiver vazia, tiver mais de 60 caracteres, for ig
 | 8 | 30 | ×1 | 18 | 14400 | ×3600 |
 | 9 | 3,0 | ×0,01 | 19 | 0 | ×1 |
 
-A string de parâmetros hoje publicada pelo script MATLAB reproduz exatamente esses valores padrão. O significado de cada índice é definido nos controladores (`controlers.c`). Os índices 17 e 18 usam a escala 3600, o que sugere horas na string convertidas para segundos.
+Os índices 17 e 18 são enviados em horas (`003` e `004`). ### Dois vetores de parâmetros
+
+O broker mantém dois vetores e publica um só, conforme a ocupação total: o da **zona ocupada** (ocupação > 0), que prioriza o conforto próximo de 23 °C, e o da **zona vazia** (ocupação = 0), que também mantém a temperatura próxima de 23 °C, porém com menor exigência, para economizar energia. Os controladores não escolhem o conjunto; apenas recebem o vetor publicado. Os dois são comuns às duas placas.
+
+| Índice | Parâmetro | Zona ocupada | Zona vazia |
+|---|---|---|---|
+| 3 | `LD_BANDA` (°C) | 0,30 | 1,00 |
+| 6 | `PI_KP` | 1,40 | 0,48 |
+| 7 | `PI_TI` (min) | 14 | 14 |
+| 10 | `AD_TREF_VAZIA` (°C) | 24 | 24 |
+| 11 | `AD_KFF0` (°C/pessoa) | 0,66 | 0,66 |
+| 12 | `AD_GAMMA` | 0,0018 | 0,0018 |
+| 15 | `CORR_ACIMA` (°C) | 0,30 | 1,00 |
+| 16 | `CORR_ABAIXO` (°C) | −0,20 | −0,67 |
+
+Os demais índices têm o valor padrão da tabela acima. Strings iniciais (antes de qualquer atualização do recursivo):
+
+```
+ocupada: 020026023030020026140014030300024066018120100030020003004000
+vazia:   020026023100020026048014030300024066018120100100067003004000
+```
+
+Os parâmetros `PI_KP`, `PI_TI` e `AD_KFF0` (índices 6, 7 e 11) dependem do modelo da sala e são **substituídos** pelo broker com o pacote da identificação recursiva (seção própria, abaixo). Os demais permanecem fixos.
 
 ### API pública
 
@@ -575,17 +434,19 @@ void coms_init(bool all);
 void wake_up(const float *data);
 bool intercom_send(const float *data);
 bool intercom_read(char *out);
+bool intercom_timestamp(char *out);
+bool intercom_ocupation(char *out);
+bool intercom_warnings(char *out);
 void intercom_read_parameters(void);
 bool intracom_send(const float *data, int slave_index);
 bool intracom_read(char *out_msg);
-
 ```
 
 ----------
 
 ## `MQTT.h` — Credenciais e configuração de rede (arquivo sensível)
 
-Não é versionado com os dados reais. Concentra as definições usadas por `coms.c`: `SSID`, `SSIDp`, `MQTT_BROKER`, `MQTT_port`, `ESPS_NUM` e a struct `MQTT_t`, com uma linha de credenciais **por dispositivo**, indexada por `ESP_Iam`:
+Não é versionado com os dados reais. Define `SSID`, `SSIDp`, `MQTT_BROKER` (`mqtt://mqtt3.thingspeak.com`), `MQTT_port` (1883), `BROKERid`, `ESPS_NUM` e a struct `MQTT_t`, com uma linha por placa, indexada por `ESP_Iam`:
 
 ```c
 typedef struct {
@@ -593,69 +454,295 @@ typedef struct {
     char u[ESPS_NUM][32];     // usuário MQTT
     char p[ESPS_NUM][32];     // senha MQTT
     char c[ESPS_NUM][32];     // client id
-    char id[ESPS_NUM][16];
-    char pub[ESPS_NUM][64];   // tópico de publicação
-    char sub[ESPS_NUM][64];   // tópico de instruções
-    char par[ESPS_NUM][64];   // tópico de parâmetros
+    char id[ESPS_NUM][16];    // canal da placa
+    char pub[ESPS_NUM][64];   // channels/<canal da placa>/publish
+    char sub[ESPS_NUM][64];   // channels/<broker>/subscribe/fields/field1
+    char par[ESPS_NUM][64];   // .../field2
+    char time[ESPS_NUM][64];  // .../field7
+    char ocpt[ESPS_NUM][64];  // .../field6
+    char warn[ESPS_NUM][64];  // .../field8
 } MQTT_t;
-
 ```
 
-`credentials_init()` copia a linha do dispositivo atual para as variáveis globais `HOSTNAME`, `MQTTu`, `MQTTp`, `MQTTc`, `MQTTid`, `MQTTpub`, `MQTTsub` e `MQTTpar`. Se `ESP_Iam == -1`, imprime "ESP não registrada" e não carrega nada.
+`credentials_init()` copia a linha da placa atual para as variáveis globais (`HOSTNAME`, `MQTTu`, `MQTTp`, `MQTTc`, `MQTTid`, `MQTTpub`, `MQTTsub`, `MQTTpar`, `MQTTtime`, `MQTTocpt`, `MQTTwarn`). Se `ESP_Iam == -1`, imprime "ESP não registrada" e não carrega nada. Como `coms_init` chama `credentials_init` em todas as placas, inclusive nas cortinas, `ESPS_NUM` precisa cobrir todos os índices cadastrados em `ESP[]`.
+
+### Requisitos da rede local
+
+-   Wi-Fi 2,4 GHz, com IP por DHCP.
+-   Saída TCP na porta **1883** para `mqtt3.thingspeak.com` (MQTT sem TLS; publicação e assinatura na mesma conexão).
+-   Saída UDP e TCP na porta **53** (DNS).
+-   Todas as conexões partem das placas; nenhuma porta de entrada precisa ser aberta, basta o firewall permitir o tráfego de resposta.
 
 ----------
 
-## `main.c` — Ponto de entrada e lógica de coordenação (placas da rede)
+## `MAC.c` / `MAC.h` — Identidade do dispositivo
 
-Inicializa os módulos (`curtain_init`, `emiter_init`, `DHT22_init`, `DS18B20_init`, `coms_init(true)`) e roda um laço a cada 200 ms que integra leitura de sensores, comunicação em rede, cálculo do controlador e comando do ar-condicionado.
+Cada placa descobre seu papel sem firmware diferente: uma tabela fixa associa o **MAC de fábrica** a um índice.
 
-### Estado principal
+```c
+typedef struct {
+    int com;
+    uint8_t mac[6];
+    bool Iam;
+} ESP_t;
+```
 
-| Variável | Papel |
-|---|---|
-| `data[5]` | Estado local: `{DS18B20, DHT22 temperatura, DHT22 umidade, ocupação, mensagens}`. O quinto campo está reservado (hoje fica em `0`). |
-| `old_data[5]` | Cópia da iteração anterior, para detectar a transição de ocupação de `0` para `>0`. |
-| `ControlType` | Controlador ativo (começa em `1`), atualizado pelas instruções do broker. |
-| `temp_alvo` / `new_temp` / `last_temp` | Setpoint vindo do broker, temperatura calculada pelo controlador e última temperatura enviada ao ar-condicionado. |
-| `broker_msg` | Código do broker para esta placa; `9` significa "desligar o ar-condicionado". |
-| `HVACon` | Se o ar-condicionado está, para este firmware, ligado. Evita comandos de power redundantes e permite repetir a tentativa se a transmissão IR falhar. |
-| `command` | Último código de comando recebido (`1` = o broker espera resposta). |
-| `LastBrokerMsg` / `LastDataMngt` | Instantes (s) da última troca com o broker/sincronização e da última leitura de dados. |
-| `synchronize` | Valor de sincronização enviado pelo `ESP0` (`101.0`). |
+-   `mac` — endereço de 6 bytes da placa.
+-   `com` — número de identificação associado à placa.
+-   `Iam` — `true` na entrada da placa que está rodando o código.
 
+**`mac_init()`** lê o MAC da interface Wi-Fi (`esp_read_mac`), procura uma correspondência em `ESP[]`, marca `Iam` e grava o índice em `ESP_Iam` (`-1` se a placa não estiver cadastrada). Avisa se a tabela passar de 10 placas, o tamanho da lista de _peers_ em `coms.c`.
 
-### Controladores
+`NUM_ESPS` é calculado a partir do tamanho da tabela. `discover_mac()` só imprime o MAC, útil para cadastrar uma placa nova.
 
-A cada leitura de dados, o `main.c` empurra o histórico de ocupação e temperatura (`old_temps`) e escolhe a função que calcula a nova temperatura do ar-condicionado a partir da ocupação e do setpoint:
+### API pública
 
-| `ControlType` | Controlador | Função |
+```c
+extern const int NUM_ESPS;
+extern ESP_t ESP[];
+extern int ESP_Iam;
+void mac_init(void);
+void discover_mac(void);
+```
+
+----------
+
+## `curtain.c` / `curtain.h` — Ocupação nas placas da rede
+
+Recebe a variação de ocupação por duas entradas que alimentam a mesma variável, `carga_termica`:
+
+1.  **ESP-NOW**, vindo da cortina: a cada volta, `intracom_read` e `atof` convertem a mensagem e somam o valor.
+2.  **Botões físicos**, para testes e correções:
+
+| Entrada | Efeito em `carga_termica` | LED |
 |---|---|---|
-| 1 | Liga/Desliga | `LigaDesliga(ocupação, temp_alvo)` |
-| 2 | PI | `ControlPI(ocupação, temp_alvo)` |
-| 3 | Adaptativo | `ControlAdap(ocupação, temp_alvo)` |
-| 4 | Degrau | `Step(ocupação, temp_alvo)` |
-| outro | Inválido | Imprime aviso e usa `LigaDesliga` |
+| Botão do GPIO 7 | `+1` | Vermelho (`255, 0, 0`) |
+| Botão do GPIO 6 | `−1` | Azul (`0, 0, 255`) |
+| Os dois juntos | `−1100`, que provoca o alerta 8 e zera a ocupação | Roxo (`128, 0, 128`) |
 
-Esses controladores estão em `controlers.c/h` e usam `parameters[]`.
+Tudo roda na tarefa `curtain_task` (pilha de 6144 bytes, prioridade 1), por _polling_ a cada 20 ms, com 50 ms de _debounce_ na borda de pressionar.
 
-### Ciclo do laço principal
+`carga_termica` funciona como **caixa de correio**: guarda só a variação desde a última leitura. O `main.c`, a cada 8 s, soma o conteúdo a `data[3]` e zera a caixa.
 
-1.  **Despertar** (quando `data[3]` passa de `0` para `>0`): o `ESP0` envia `101.0` aos demais por `intracom_send` (sincronização); a placa publica `data` por `intercom_send`, liga o ar-condicionado (`send_ir_command` com `power = EMITER_ON`), marca `HVACon` e registra `LastBrokerMsg`. Se o IR falhar, `HVACon` volta a `false`.
-2.  **Obtenção de dados** (a cada `data_interval` = 8 s): soma `carga_termica` à ocupação `data[3]` (limitada em `0`) e zera a caixa; lê `DS18B20_read`/`DHT22_read`, atualizando `data[0..2]` quando a leitura é válida; atualiza o histórico e calcula `new_temp` pelo controlador ativo.
-3.  **Envio ao broker** (quando passaram `broker_interval` = 15 s desde `LastBrokerMsg` **e** `command == 1`): publica `data` por `intercom_send`, zera `command` e renova `LastBrokerMsg`.
-4.  **Leitura e aplicação de instruções** (quando passaram `HVAC_interval` = 17 s desde `LastBrokerMsg`):
-    -   Chama `intercom_read_parameters()` e `intercom_read(instrucao)`.
-    -   Decodifica a instrução de 6 dígitos `ABCDEF`: `AB` = temperatura alvo, `C` = controlador, `D` = mensagem para o `ESP0`, `E` = mensagem para o `ESP1`, `F` = comando.
-    -   `ESP0` e `ESP1` atualizam `temp_alvo`, `ControlType` e `broker_msg` com o que lhes cabe (`D` ou `E`); outras placas ignoram a instrução.
-    -   Se `new_temp` mudou desde o último envio, transmite o comando de temperatura ao ar-condicionado.
-    -   Se `broker_msg == 9` e `HVACon` está ligado, transmite o comando de desligar; em caso de sucesso marca `HVACon = false` e, em caso de falha, mantém `true` para tentar de novo no ciclo seguinte.
-5.  **ESP-NOW**: lê `intracom_read` e, se o valor for `101.0`, atualiza `LastBrokerMsg` (placa sincronizada com o `ESP0`).
+`curtain_init` configura os botões como entrada com pull-up, chama `led_init()` (de `PIRcurtain.c`) e cria a tarefa.
 
-Como o passo 3 só renova `LastBrokerMsg` quando `command == 1`, enquanto o broker mandar `ESPactive = 0` o passo 4 passa a rodar em todas as iterações: a placa fica em silêncio na nuvem, mas continua escutando instruções.
+### API pública
 
-Todos os comandos ao ar-condicionado são montados com `memset(&cmd, 0, sizeof(cmd))` seguido do preenchimento apenas dos campos desejados, para que campos não usados fiquem no valor `*_KEEP` e não sejam alterados sem intenção.
+```c
+extern float carga_termica;
+void curtain_init(void);
+```
 
-Há variáveis herdadas sem uso no `main.c` atual: `blacked_out`, `wakeup_data` e `wellnescheck` (da antiga lógica de _heartbeat_ com `wake_up`).
+----------
+
+## `PIRcurtain.c` / `PIRcurtain.h` — Cortina PIR e LED
+
+A cortina PIR é o placeholder da cortina final baseada em CSI, desenvolvida em projeto paralelo por Guilherme França. O `main.c` das placas da cortina é apenas:
+
+```c
+void app_main(void)
+{
+    PIRcurtain_init();
+}
+```
+
+Nas placas da rede, `PIRcurtain_init` não é chamada: o arquivo entra só como fornecedor das funções de LED.
+
+### Inicialização (`PIRcurtain_init`)
+
+1.  `led_init()`.
+2.  `coms_init(false)`: Wi-Fi e ESP-NOW, sem MQTT.
+3.  Escolhe o destino pelo índice da placa: `ESP2 → ESP0`, `ESP3 → ESP1`; qualquer outra envia a todas (`-1`).
+4.  Cria a fila `fila` (8 eventos).
+5.  GPIO 4 e 5 como entrada com pull-down e **interrupção na borda de subida**; `isr_sensor` registra o sensor (`0` = A, `1` = B) e o instante (`esp_timer_get_time`, µs) e põe o evento na fila.
+6.  Cria as tarefas `monitora_psg` e `EnviaEvento` (pilha de 4096 bytes, prioridade 5).
+
+### Aquecimento
+
+O HC-SR501 gera disparos espúrios logo após ligar. A tarefa espera 500 ms e entra em **60 s de aquecimento**: LED piscando em âmbar (`60, 20, 0`), contagem regressiva em uma única linha do terminal (escape ANSI) e fila esvaziada a cada segundo. Depois imprime `Monitorando`.
+
+### Detecção e sentido (`monitora_psg`)
+
+1.  Espera, sem limite, o **primeiro evento**.
+2.  Espera até `janela` (1500 ms) por um **segundo evento**, que só confirma a passagem se vier do **outro** sensor.
+3.  Decide o sentido pela ordem e acumula em `direcao`.
+4.  Espera `bloqueio` (1000 ms) e esvazia a fila.
+
+| Situação | Resultado | LED | `direcao` |
+|---|---|---|---|
+| A primeiro, B confirma na janela | Entrada | Vermelho (`60, 0, 0`) | `+1` |
+| B primeiro, A confirma na janela | Saída | Azul (`0, 0, 60`) | `−1` |
+| Só um sensor na janela | Sem sentido | Verde (`0, 60, 0`) | Nada |
+
+Como o instante de cada borda é medido na interrupção, o intervalo impresso não depende do escalonamento da tarefa.
+
+### Envio com confirmação (`EnviaEvento`)
+
+A tarefa dorme em `ulTaskNotifyTake` até `monitora_psg` registrar uma passagem. Então tenta `intracom_send(&direcao, ESPdestino)`:
+
+-   **ACK recebido:** zera `direcao` e `COMSerrorPIR`.
+-   **Falha:** incrementa `COMSerrorPIR`, espera 1 s e tenta de novo, até conseguir.
+
+Passagens que acontecem enquanto um envio está pendente se somam em `direcao`, então a mensagem pode carregar `±2`, `±3` etc. Com `COMSerrorPIR ≥ 7`, o LED fica **branco fixo** (`150, 150, 150`) até um envio dar certo.
+
+### Funções de LED
+
+O LED integrado é um WS2812 endereçável, controlado pelo componente `led_strip` (GRB, 1 LED, RMT a 10 MHz).
+
+-   **`led_init`** — cria o dispositivo. Se falhar, grava o motivo em `error_code`, imprime com o prefixo `curtain:` e deixa o LED desativado; as outras funções viram nulas e o firmware segue.
+-   **`led_set(ligado, r, g, b)`** — acende com a cor ou apaga.
+-   **`led_blink(r, g, b)`** — acende por 400 ms e apaga, bloqueando a tarefa que chamou.
+
+### Contrato com a cortina
+
+O que qualquer cortina (PIR ou CSI) precisa enviar:
+
+| Item | Valor |
+|---|---|
+| Meio | ESP-NOW, à placa da rede da sua área |
+| Formato | Um `float` em texto, no formato do `%f` (por exemplo `"1.000000"`) |
+| Significado | Variação de ocupação desde o último envio confirmado: positivo = entradas, negativo = saídas |
+| Confirmação | Reenviar até o envio ter ACK do ESP-NOW |
+
+### API pública
+
+```c
+void PIRcurtain_init(void);
+void led_init(void);
+void led_blink(int r, int g, int b);
+void led_set(bool ligado, int r, int g, int b);
+```
+
+----------
+
+## `temperature.c` / `temperature.h` — Sensor DS18B20
+
+Lê a temperatura por **1-Wire**, protocolo de um único fio em que o mestre e o sensor se revezam na linha e a informação está na duração de cada pulso. Todo o protocolo é implementado por bit-banging, sem biblioteca:
+
+-   **`pin_config`** — GPIO 0 em dreno aberto (o mesmo fio escreve e lê), com pull-up interno reforçando o resistor externo de 4,7 kΩ.
+-   **`t_wellnesscheck`** — pulso de reset (480 µs) e verificação do pulso de presença, com a amostragem dentro de uma seção crítica para que o escalonador não estrague o timing.
+-   **`t_write_bit` / `t_read_bit`** — um bit por slot, com os tempos do datasheet, também em seção crítica.
+-   **`t_write_byte` / `t_read_byte`** — 8 bits, LSB primeiro.
+-   **`confirm_Sdigit`** — CRC-8 Maxim (polinômio `0x8C`) sobre os 8 primeiros bytes do scratchpad, comparado ao 9º.
+-   **`t_wake_up`** — `Skip ROM` (`0xCC`) + `Convert T` (`0x44`).
+-   **`t_read_sensor`** — `Skip ROM` + `Read Scratchpad` (`0xBE`), lê 9 bytes, valida o CRC, rejeita scratchpad vazio (`0xFF 0xFF`) e converte os dois bytes (complemento de dois, escala 1/16 °C) em `float`.
+
+`DS18B20_read` dispara a conversão, espera 800 ms (`vTaskDelay`, sem ocupar a CPU) e lê. Bloqueia a tarefa chamadora por esse tempo, por isso é chamada sob demanda, a cada 8 s.
+
+### API pública
+
+```c
+void DS18B20_init(void);
+bool DS18B20_read(float *out_celsius);
+```
+
+----------
+
+## `humidity.c` / `humidity.h` — Sensor DHT22
+
+Lê temperatura e umidade por bit-banging, com o protocolo próprio do fabricante: cada bit é codificado pela **duração do nível alto**.
+
+-   **`pin_config`** — GPIO 1 em dreno aberto com pull-up.
+-   **`bit_length(nivel)`** — espera a linha chegar ao nível pedido e devolve quanto tempo levou, em µs, ou `-1` após 200 µs.
+-   **`h_read_data`** — segura a linha em nível baixo por 1,2 ms (sinal de início), solta e, dentro de uma seção crítica, espera a resposta do sensor (três transições) e lê os 40 bits; nível alto acima de 45 µs é `1` (~70 µs), abaixo é `0` (~26 µs).
+-   **`confirm_Sdigit`** — soma dos 4 primeiros bytes comparada ao 5º; converte umidade e temperatura (16 bits cada, ÷10). O bit mais significativo da temperatura é o sinal (não é complemento de dois).
+
+### API pública
+
+```c
+typedef struct {
+    float temperature;
+    float humidity;
+} dht22_reading_t;
+
+void DHT22_init(void);
+bool DHT22_read(dht22_reading_t *out);
+```
+
+----------
+
+## `emiter.cpp` / `emiter.h` — Emissor IR para o ar-condicionado
+
+Monta e transmite os comandos do controle remoto do ar-condicionado Philco, no protocolo **GOODWEATHER** (48 bits), com a classe `IRGoodweatherAc` da biblioteca `IRremoteIDF`.
+
+### O protocolo
+
+-   Cada quadro: cabeçalho, **6 bytes, cada um LSB primeiro e seguido do seu complemento** (96 bits no fio) e rodapé. Portadora de 38 kHz.
+-   Protocolo "botão + estado": **todo quadro leva o estado completo** do ar (power, modo, temperatura, ventilação, oscilação) mais o código do botão apertado. Por isso o emissor mantém um estado persistente.
+-   O quadro de ligar ressincroniza o ar com o estado guardado no emissor.
+
+Timings usados (µs), medidos no controle remoto real com o TSOP:
+
+| Elemento | Duração |
+|---|---|
+| Marca do cabeçalho | 6086 |
+| Espaço do cabeçalho | 7374 |
+| Marca de bit | 536 |
+| Espaço de bit `1` | 540 |
+| Espaço de bit `0` | 1630 |
+| Espaço do rodapé | 7404 |
+
+### API simplificada (`emiter_cmd_t`)
+
+`power` (`KEEP`/`ON`/`OFF`), `mode`, `temp_c`, `fan`, `flap`, `turbo_toggle`, `light_toggle`, `sleep_toggle`. **Zero em qualquer campo significa "não mexer"**, o que isola o resto do sistema dos detalhes da biblioteca.
+
+### Peças internas
+
+-   **`native_mode` / `native_fan` / `native_swing`** — traduzem os enums da API para as constantes da biblioteca e rejeitam valores não suportados.
+-   **`validate`** — confere todos os campos, inclusive a faixa de temperatura do protocolo, antes de transmitir qualquer coisa.
+-   **`convert_to_LARA`** — monta e transmite o quadro manualmente com os timings medidos (ativado por `in_LARA`; com `0`, usa o `send()` padrão da biblioteca).
+-   **`send_frame`** — transmite um quadro, com `interframe` (150 ms) entre quadros consecutivos de um mesmo comando.
+-   **`send_temp`** — o protocolo muda temperatura por "Up/Down"; envia em um quadro só (`temp_step = 0`) ou grau a grau (`temp_step = 1`). Se a temperatura pedida já for a guardada no estado, **não transmite nada**.
+-   **`emiter_init`** — cria o mutex e os objetos da biblioteca no GPIO 5 e carrega como estado inicial o quadro capturado do controle real, `0xD52806000000` (ligado, frio, 24 °C, ventilação automática, oscilação lenta).
+-   **`send_ir_command`** — aplica cada campo preenchido e transmite um quadro por campo, na ordem liga → modo → temperatura → ventilação → oscilação → toggles → desliga, sob mutex.
+
+O estado só existe na RAM: ao reiniciar a placa, ele volta a 24 °C ligado, independentemente do estado real do ar.
+
+### API pública
+
+```c
+bool emiter_init(void);
+bool send_ir_command(const emiter_cmd_t *cmd);
+// send_ir_command(&(emiter_cmd_t){ .power = EMITER_ON });
+```
+
+----------
+
+## `identify.cpp` / `identify.h` — Captura e identificação de sinais IR
+
+Ferramenta de desenvolvimento, baseada na `IRremoteIDF`, que escuta o TSOP no GPIO 4 (buffer de 1024, timeout de 50 ms) e imprime para cada sinal:
+
+-   o protocolo detectado;
+-   se for um ar-condicionado suportado, o resumo do estado (modo, temperatura, ventilação etc.);
+-   o código-fonte do sinal bruto capturado.
+
+Roda como **tarefa contínua** (`identify_task`, pilha de 6144, prioridade 1), porque não há como prever quando um sinal chega. Foi com ela que o protocolo GOODWEATHER e os timings de `emiter.cpp` foram obtidos. O `main.c` das placas da rede **não** a inicializa.
+
+### API pública
+
+```c
+void identify_init(void);
+```
+
+----------
+
+## Programas de teste do IR
+
+-   **`main_identify.c`** — só roda `identify_init()`. Usado em uma segunda placa para ler o que o emissor transmite e comparar o `Code:` impresso.
+-   **`main_emiter.c`** — envia comandos por sequências de botões: os dois juntos iniciam (roxo), botão 6 = bit `0` (azul), botão 7 = bit `1` (branco), os dois de novo executam (laranja).
+
+| Sequência | Comando |
+|---|---|
+| `000` | Ligar |
+| `001` | Desligar |
+| `010` | 18 °C |
+| `011` | 20 °C |
+| `100` | 22 °C |
+| `101` | 26 °C |
+| `110` | 28 °C |
+| `111` | 30 °C |
+
+Sequência inválida acende vermelho.
 
 ----------
 
@@ -663,80 +750,237 @@ Há variáveis herdadas sem uso no `main.c` atual: `blacked_out`, `wakeup_data` 
 
 | Trecho | Meio | Conteúdo |
 |---|---|---|
-| Cortina → placas da rede | ESP-NOW | `float` em texto: `+1.0` entrada, `-1.0` saída |
-| `ESP0` → demais placas | ESP-NOW | `101.0` (sincronização) |
-| Placa → canal ThingSpeak da placa | MQTT | `field1` DS18B20, `field2` DHT22 temp., `field3` DHT22 umid., `field4` ocupação, `field5` mensagens |
-| Painel → canal de configuração | HTTP | `field1` controlador, `field2` setpoint, `field3` gasto energético (só quando pendente) |
-| MATLAB → canal do broker | ThingSpeak | `field1` comando de 6 dígitos, `field2` parâmetros (60 dígitos), `field3..5` gasto por controlador (`-1` marca troca de controlador) |
-| Canal do broker → placas | MQTT | Instrução em `MQTTsub`, parâmetros em `MQTTpar` |
+| Cortina → placa da rede | ESP-NOW | `float` em texto (`%f`): variação de ocupação |
+| Placa → seu canal ThingSpeak | MQTT | `field1` DS18B20, `field2` DHT22 temp., `field3` DHT22 umid., `field4` ocupação acumulada, `field5` alerta, `field6` setpoint calculado |
+| Painel → servidor | HTTP POST (`/api/lista`) | controlador, setpoint, estado (0 ou 1), gasto e senha |
+| Servidor → canal de configuração | HTTP update | `field1` controlador, `field2` setpoint, `field3` gasto energético, `field4` estado, `field5` pacote de parâmetros (12 dígitos) |
+| Broker → canal do broker | ThingSpeak | `field1` instrução, `field2` parâmetros, `field3..5` gasto por controlador, `field6` ocupação total, `field7` instante, `field8` eco dos alertas |
+| Canal do broker → placas | MQTT | Assinatura dos fields 1, 2, 6, 7 e 8 |
 
-Instrução (`ABCDEF`), construída como `SetPoint·10⁴ + ControlType·10³ + msg1·10² + msg2·10 + ESPactive`. Exemplo: `231111` = setpoint 23 °C, controlador 1, mensagens `1`/`1`, placas ativas.
+### Pacote de parâmetros (`field5` do canal de configuração)
 
+Inteiro de 12 dígitos, quatro grupos de 3: `KpOcup KpVazia Ti kff0`, cada um já na escala do vetor (`Kp` e `kff0` ×0,01; `Ti` em minutos). Exemplo: `140048014066` é `Kp` = 1,40 (zona ocupada), `Kp` = 0,48 (zona vazia), `Ti` = 14 min e `kff0` = 0,66. Um único número cabe com folga na precisão do ThingSpeak, o que não ocorreria com a string de 60 dígitos.
+
+### Instrução (`ABCDEF`)
+
+| Dígitos | Conteúdo |
+|---|---|
+| `AB` | Temperatura-alvo (°C) |
+| `C` | Tipo de controlador (1 a 5) |
+| `D` | Mensagem para o `ESP0` (`9` = desligar o ar) |
+| `E` | Mensagem para o `ESP1` (`9` = desligar o ar) |
+| `F` | `ESPactive` |
+
+Construída como `SetPoint·10⁴ + ControlType·10³ + msg1·10² + msg2·10 + ESPactive`. Exemplo: `231111` = 23 °C, Liga/Desliga, mensagens `1`/`1`, ativo.
 
 ----------
 
 ## Broker ThingSpeak (MATLAB Analysis)
 
-O script MATLAB é o "cérebro" na nuvem. As chaves e os IDs de canal ficam fora do código versionado. A cada execução:
+O script é o coordenador na nuvem, disparado por um React no canal do painel. As chaves e IDs ficam fora do código versionado. A cada execução:
 
-1.  **Lê** a última amostra (fields 1 a 5) de cada canal de placa e, do canal de configuração do painel, `ControlType`, `SetPoint` e `GastoEnergetico` (fields 1 a 3). A ocupação considerada é o **maior** `field4` entre os canais (ignorando `NaN`). Falhas de leitura são tratadas por canal, sem derrubar o script.
-2.  **Respeita o intervalo mínimo** de 15 s desde a última gravação no canal do broker (limite do ThingSpeak gratuito), pausando se necessário.
-3.  **Decide o comando** (`BrokerControl`): com controlador **Adaptativo (3)** e ocupação `<= 0`, envia mensagens `9`/`9` e `ESPactive = 0` (desligar e silenciar as placas). Nos demais casos envia `1`/`1`/`1`.
-4.  **Contabiliza o gasto energético** por controlador: detecta troca de controlador comparando com o último comando gravado (`GetLastControlType`). Numa troca, grava `-1` nos três campos de gasto, como marca; com um gasto novo e controlador válido (1 a 3), grava o valor no campo do controlador ativo.
-5.  **Grava no canal do broker**: `field1` comando, `field2` string de parâmetros (60 dígitos, hoje igual aos padrões de `coms.c`) e, quando há gasto novo ou troca, `field3..5`.
+1.  **Respeita o intervalo mínimo** de 15 s desde a última escrita no canal do broker (`IntervaloMinimo`), pausando se necessário.
+2.  **Lê** a última amostra (fields 1 a 6) do canal de cada placa, com `try/catch` por canal, e, do canal de configuração, `ControlType`, `SetPoint`, `GastoEnergetico` e o pacote de parâmetros (`field5`).
+3.  **Ocupação** (`GetOcupation`): soma os níveis acumulados das duas placas (`NaN` vale 0). Se alguma placa reportar o alerta `8`, a ocupação vale 0. Nunca fica negativa.
+4.  **Alertas** (`Alertas`): codifica os alertas das duas placas como `ESP0·10 + ESP1`, devolvido em `field8` como eco.
+5.  **Comando** (`BrokerControl`): com o controlador **Direto (5)** e ocupação `≤ 0`, envia mensagens `9`/`9` e `ESPactive = 0` (desligar os ares). Nos demais casos, `1`/`1`/`1`.
+6.  **Parâmetros** (`MontaParametros`): parte de um dos dois vetores iniciais, escolhido pela ocupação (> 0: zona ocupada; caso contrário, zona vazia), e substitui `Kp`, `Ti` e `kff0` pelos valores do pacote. Se o pacote estiver ausente, for `NaN` ou estiver fora de `[0, 10¹²)`, publica o vetor inicial sem alterações.
+7.  **Gasto energético**: detecta troca de controlador comparando com o dígito `C` da última instrução gravada (`GetLastControlType`). Numa troca, grava `-1` nos três campos de gasto como marca; com um gasto novo e controlador de 1 a 3, grava o valor no campo do controlador ativo.
+8.  **Grava** no canal do broker: fields 1, 2, 6, 7 e 8 sempre; fields 3 a 5 também quando há gasto novo ou troca. O `field7` é o instante da escrita em segundos dentro da hora (`minuto·60 + segundo`).
 
 ----------
 
-## Painel web LARA Control (`thingspeak.html`)
+## Painel web LARA Control
 
-Página de arquivo único (HTML + CSS + JavaScript puro, com Chart.js via CDN), hospedado na netlify, que conversa direto com a API REST do ThingSpeak. Seções: temperatura desejada (16 a 27 °C), temperatura por área (um gráfico por ar-condicionado), gasto energético (envio e gráfico do controlador ativo), ocupação e tipo de controlador (troca mediante senha).
+Página de arquivo único (HTML + CSS + JavaScript, com Chart.js via CDN), hospedada na Netlify. Lê os canais pela API REST do ThingSpeak e envia a lista de configuração ao servidor do painel (seção seguinte), que a publica.
 
 | Canal | Papel | Operação |
 |---|---|---|
-| Configuração do site | Controlador, setpoint e gasto | Escrita |
-| Ar 1 e Ar 2 | Temperatura (`field1`) e ocupação (`field4`) das placas | Leitura |
+| Configuração | Controlador, setpoint, estado e gasto | Escrita, pelo servidor |
+| Ar 1 e Ar 2 | Temperatura e ocupação das placas | Leitura |
 | Broker | Gasto por controlador (`field3..5`) | Leitura |
 
-Funcionamento essencial:
+-   **Setpoint** de 16 a 27 °C; **tipo de controlador** protegido por senha.
+-   **Confirmar não publica na hora**: os botões atualizam variáveis internas e o ciclo de envio leva a lista ao servidor. Os gráficos atualizam a cada 20 s.
+-   A regra de quando publicar no ThingSpeak (intervalo de 17 s, silêncio com o estado desligado e gasto pendente) é aplicada pelo servidor; o gasto só é considerado enviado depois que o ThingSpeak confirma a gravação, e o mesmo valor não é reenviado em seguida.
+-   O gráfico de gasto usa o campo do broker do controlador ativo (1 → `field3`, 2 → `field4`, 3 → `field5`). O Degrau não tem campo de gasto, por ser usado em ensaios.
 
-
--   **Confirmar não publica na hora**: os botões apenas atualizam variáveis internas; quem publica é um ciclo de **17 s** (acima dos 15 s mínimos do ThingSpeak). Os gráficos atualizam a cada 20 s.
--   **Com ocupação 0, o site fica em silêncio**, a menos que haja um gasto energético pendente (que força a publicação, levando junto controlador e setpoint).
--   O gasto só é considerado enviado depois que o ThingSpeak confirma a gravação; o mesmo valor não pode ser reenviado em seguida.
--   O gráfico de gasto usa o campo do broker correspondente ao controlador ativo (1 → `field3`, 2 → `field4`, 3 → `field5`); o **Degrau (4)** não tem campo de gasto.
 ----------
 
-## Dependências externas de bibliotecas
+## Servidor do painel (`servidor.js`)
 
--   **`IRremoteIDF`** (github de Jorgecis) — usada por `emiter.cpp` (classe `IRGoodweatherAc`, `IRsend`) e `identify.cpp` (`IRrecv`, `IRutils`, `IRac`) para codificação/decodificação de sinais infravermelhos.
--   **`led_strip`** — componente do ESP-IDF usado por `PIRcurtain.c` para controlar o LED RGB endereçável (WS2812) integrado da placa.
--   **FreeRTOS** (tarefas, filas) e **`esp_timer`** — usados pela cortina PIR e pelo `main.c`.
--   **Chart.js 4.4.1** (cdnjs) — gráficos do painel web.
+Programa Node.js (`http`, `fs` e `crypto`, sem pacotes externos) que fica entre o painel e o ThingSpeak e roda continuamente no PC do laboratório. Escuta apenas em `127.0.0.1`; o acesso externo depende do que estiver à frente dele.
+
+### Configuração
+
+Variáveis em um arquivo `.env`, que **não é versionado**: chave de escrita do canal de configuração (`THINGSPEAK_WRITE_KEY`), senha do controlador (`SENHA_CONTROLADOR`), origem permitida do painel (`ALLOWED_ORIGIN`), porta (`PORT`, padrão 3000) e arquivo de estado (`ARQUIVO_ESTADO`). Sem as três primeiras o servidor não inicia.
+
+### API
+
+| Rota | Função |
+|---|---|
+| `POST /api/lista` | Recebe `{controlador, temperatura, estado, gasto, senha}` |
+| `GET /api/estado` | Devolve a última lista (`controlador`, `temperatura`, `estado`) |
+
+Validação: controlador inteiro de 1 a 5, temperatura de 16 a 27 °C, estado `0` ou `1`, gasto numérico opcional. A senha só é exigida quando o controlador ou o estado muda; 10 senhas erradas em 15 min bloqueiam novas tentativas. Há limite de 120 pedidos por minuto, corpo máximo de 10 KiB e verificação da origem (CORS).
+
+### Publicação no canal de configuração
+
+O servidor guarda a última lista em memória e a envia ao ThingSpeak com intervalo mínimo de **17 s**:
+
+| Campo | Conteúdo |
+|---|---|
+| `field1` | Controlador |
+| `field2` | Temperatura (setpoint) |
+| `field3` | Gasto energético, só quando há valor pendente |
+| `field4` | Estado (0 ou 1) |
+| `field5` | Pacote de parâmetros, lido de `parametros.json` |
+
+Regras de quando publicar:
+
+-   **Forçada:** na subida do estado (0 → 1) ou quando há gasto pendente.
+-   **Periódica:** a cada 17 s com o estado em 1; depois de uma descida (1 → 0), mais 4 envios.
+-   **Fora disso**, não publica.
+
+O `field5` vai em **toda** publicação, porque o broker lê apenas o último registro do canal. Por consequência, **os parâmetros só chegam às placas enquanto o servidor estiver publicando**. Se `parametros.json` não existir ou não tiver exatamente 12 dígitos, o campo é omitido e o broker usa os vetores iniciais.
+
+### Persistência e registro
+
+-   `estado.json`: última lista, contadores e gasto pendente; reaproveitado ao reiniciar.
+-   `servidor.log`: uma linha por evento, com rotação a cada 2 MiB.
+
+### Execução contínua
+
+`instalar-inicio-automatico.ps1` registra a tarefa agendada "LARA Servidor" (início do Windows, conta de serviço, reinício a cada minuto em caso de falha, sem limite de tempo) com a pasta `dados` como diretório de trabalho, e a inicia.
+
+----------
+
+## Identificação recursiva (`recursivo.py`)
+
+O modelo térmico das duas áreas é identificado em batelada (MATLAB, subespaços, método MOESP) e passa a ser atualizado continuamente por mínimos quadrados recursivos com fator de esquecimento. A cada atualização, os parâmetros dos controladores são recalculados.
+
+### Fluxo
+
+1.  Lê o último trecho dos canais das duas placas: `field1` (temperatura DS18B20), `field6` (setpoint calculado) e `field4` (ocupação acumulada). A ocupação total é a soma das duas placas, **suposta sem erro de contagem**.
+2.  Reamostra em blocos: grade de 15 s, médias de **8 amostras (2 min)**. Cada leitura vale por até 45 s e um bloco precisa de pelo menos 4 leituras válidas; blocos incompletos são ignorados.
+3.  Atualiza o RLS de cada saída (temperatura da área 0 e da área 1).
+4.  Converte o modelo em ganho `K`, constante de tempo `τ`, atraso `θ` e ganho de ocupação `Kn`, calcula os parâmetros e grava o pacote.
+
+O bloco de 2 min é necessário: com a grade de 15 s e o ruído do sensor (resolução de 0,0625 °C), o ARX estimado por mínimos quadrados subestima o ganho e a constante de tempo. Em simulação, a reamostragem eliminou esse viés.
+
+### Modelo e RLS
+
+-   ARX de múltiplas entradas, por saída, com entradas S0, S1 e Np, ordem 3 em cada polinômio e termo constante (16 parâmetros). Os dados são centrados pelas médias do ensaio em batelada.
+-   Inicialização com o modelo em batelada: `A`, `B`, `C`, `D` (ordem 3, `Ts` = 15 s) e as médias de entradas e saídas, exportados por `exportar_modelo.m` para `modelo.json`. O modelo é discretizado para o período de 2 min e convertido em ARX por `ss2tf`, com denominador comum `det(zI − A)`.
+-   Fator de esquecimento `λ = 0,995` (memória de cerca de 200 blocos, 6,7 h); covariância inicial `0,001·I`. O esquecimento é suspenso se o traço de `P` passar de 10³, para evitar divergência sem excitação.
+
+### Parâmetros calculados
+
+Para cada área, a resposta ao degrau do setpoint nas duas entradas S0 e S1 (modo comum) fornece `K` e, pelos instantes em que atinge 28,3 % e 63,2 % do valor final, `τ = 1,5·(t63 − t28)` e `θ = t63 − τ`. Os valores das duas áreas são **promediados**, pois o broker publica um vetor único. `Kn` é o ganho estático da ocupação.
+
+| Parâmetro | Cálculo |
+|---|---|
+| `Kp` (zona ocupada) | `τ / [K (τ + θ)]` (sintonia por modelo interno, `λ = τ`) |
+| `Kp` (zona vazia) | `τ / [K (3τ + θ)]` (`λ = 3τ`, malha três vezes mais lenta) |
+| `Ti` | `τ` (min) |
+| `kff0` | `Kn / K` |
+
+### Validação e limites
+
+-   Uma atualização é **descartada** se o modelo for instável, `K` sair de [0,1; 3] ou `τ` sair de [3; 60] min. O motivo vai ao histórico.
+-   Faixas: `Kp` em [0,10; 9,99], `Ti` em [3; 120] min, `kff0` em [0; 0,99].
+-   Cada parâmetro varia no máximo **5 %** por atualização em relação ao último valor aceito.
+-   Sem excitação (setpoint e ocupação praticamente constantes), a estimativa não é confiável; o limite de variação protege os controladores, mas não substitui a análise do histórico.
+
+### Saída
+
+Os arquivos ficam na pasta de trabalho (`dados`):
+
+| Arquivo | Conteúdo |
+|---|---|
+| `modelo.json` | Modelo em batelada (entrada, gerado no MATLAB) |
+| `parametros.json` | `{"pacote": "KpOcup KpVazia Ti kff0", "t": ...}`, lido pelo servidor |
+| `estado_recursivo.json` | `θ`, `P` e instante da última amostra; permite retomar após uma parada |
+| `historico_parametros.csv` | Uma linha por ciclo: erro de predição (RMSE de cada área), validade, `K`, `τ`, `θ`, `Kn`, `Kp` (ocupada e vazia), `Ti`, `kff0` e pacote |
+| `recursivo.log` | Uma linha por ciclo, com erros |
+
+Para recomeçar do modelo em batelada, apague `estado_recursivo.json` com o programa parado.
+
+### Execução
+
+Ciclo de 5 min (`INTERVALO_CICLO`); na primeira execução baixa as últimas 6 h. Erros de rede são registrados e o ciclo seguinte tenta de novo. As chaves de leitura dos canais das placas ficam em constantes no início de `recursivo.py` (arquivo sensível: não versionar com as chaves reais).
+
+Requisitos: Python 3.9 ou superior com `numpy` e `scipy` (`python -m pip install numpy scipy`).
+
+Passos de instalação:
+
+1.  No MATLAB, após o `passo1.m`, rodar `exportar_modelo.m`; copiar o `modelo.json` gerado para a pasta `dados`.
+2.  Teste manual: dentro de `dados`, `python ..\recursivo.py`; deve aparecer `OK K=... tau=...`. Interromper com Ctrl+C.
+3.  `instalar-recursivo.ps1` (PowerShell, na pasta do programa) registra a tarefa "LARA Recursivo" para o usuário atual, no logon, com `pythonw.exe` (sem janela), reinício a cada minuto em caso de falha e sem limite de tempo. Python instalado só para um usuário não é acessível à conta de serviço, por isso a tarefa roda no usuário.
+4.  Confirmar, passados alguns minutos, que `recursivo.log` ganha uma linha a cada ciclo e que o `field5` do canal de configuração mostra o pacote (isto exige o servidor reiniciado com `lerPacote`).
+
+----------
+
+## Compilação
+
+-   ESP-IDF **v6.0**, alvo `esp32c6`.
+-   Dependências (`idf_component.yml`): `espressif/led_strip ^3.0.0` e `jorgecis/irremoteidf ^1.0.0`. No IDF 6 o `driver/gpio.h` pertence ao componente `esp_driver_gpio`, que precisa constar no `REQUIRES` da `IRremoteIDF`.
+-   Tabela de partições **"Single factory app (large)"** e flash de **8 MB**: o binário com a biblioteca de IR passa de 1 MB.
+-   `MQTT.h` não é versionado; crie o seu a partir da estrutura descrita acima.
+-   Arquivos que usam a biblioteca de IR são `.cpp` e expõem a API com `extern "C"`.
+
+----------
+
+## Dependências externas
+
+-   **`IRremoteIDF`** (Jorgecis), port do IRremoteESP8266 — `emiter.cpp` (`IRGoodweatherAc`, `IRsend`) e `identify.cpp` (`IRrecv`, `IRutils`, `IRac`).
+-   **`led_strip`** — LED WS2812 integrado.
+-   **FreeRTOS** (tarefas, filas, semáforos, notificações) e **`esp_timer`**.
+-   **ESP-MQTT**, **ESP-NOW** e **esp_wifi**, do ESP-IDF.
+-   **Chart.js 4.4.1** — gráficos do painel.
+
+----------
 
 ## Estrutura de arquivos
 
 ```
 Firmware das placas da rede (main/)
-├── main.c                # Ponto de entrada e coordenação geral
-├── MAC.c / MAC.h         # Identidade do dispositivo (tabela de MACs)
+├── main.c                # Coordenação geral
+├── MAC.c / MAC.h         # Identidade da placa (tabela de MACs)
 ├── coms.c / coms.h       # Wi-Fi, MQTT, ESP-NOW e parâmetros remotos
-├── MQTT.h                # Credenciais e configuração de rede (sensível)
-├── controlers.c / .h     # Controladores (LigaDesliga, PI, Adaptativo, Degrau)
-├── temperature.c / .h    # Sensor DS18B20 (1-Wire)
-├── humidity.c / .h       # Sensor DHT22
-├── identify.cpp / .h     # Captura e decodificação de sinais IR (desenvolvimento)
-├── emiter.cpp / .h       # Emissor de comandos IR para o ar-condicionado
-├── curtain.c / .h        # Ocupação: ESP-NOW da cortina + botões manuais
-└── PIRcurtain.c / .h     # Funções de LED (usadas aqui) e cortina PIR
+├── MQTT.h                # Credenciais e tópicos (sensível, fora do git)
+├── controlers.c / .h     # LigaDesliga, PI, Adaptativo, Degrau, Direto
+├── temperature.c / .h    # DS18B20 (1-Wire)
+├── humidity.c / .h       # DHT22
+├── emiter.cpp / .h       # Emissor IR GOODWEATHER
+├── identify.cpp / .h     # Captura e identificação IR (desenvolvimento)
+├── curtain.c / .h        # Ocupação: ESP-NOW da cortina + botões
+└── PIRcurtain.c / .h     # Funções de LED (usadas aqui)
 
-Firmware da placa da cortina (main/)
-├── main.c                # Apenas importações e app_main() { PIRcurtain_init(); }
-├── PIRcurtain.c / .h     # Detecção PIR, sentido, envio por ESP-NOW e LED
-├── coms.c / .h           # Comunicação (aqui, só ESP-NOW: coms_init(false))
-└── MAC.c / .h            # Identidade da placa e tabela de ESPs
+Firmware das placas das cortinas (main/)
+├── main.c                # app_main() { PIRcurtain_init(); }
+├── PIRcurtain.c / .h     # Detecção PIR, sentido, envio com ACK e LED
+├── coms.c / .h           # Só ESP-NOW: coms_init(false)
+├── MQTT.h                # Necessário para credentials_init
+└── MAC.c / .h            # Identidade e tabela de placas
+
+Testes do IR
+├── main_identify.c       # Só o identify
+└── main_emiter.c         # Comandos por sequência de botões
 
 Nuvem e interface
-├── Broker ThingSpeak     # Script MATLAB Analysis (dados sensíveis omitidos)
-└── thingspeak.html       # Painel web LARA Control (publicar como index.html)
+├── Broker ThingSpeak     # Script MATLAB Analysis (chaves fora do git)
+└── thingspeak.html       # Painel LARA Control (publicar como index.html)
 
+Servidor e identificação (PC do laboratório)
+├── servidor.js                    # Servidor do painel (Node.js)
+├── .env                           # Chave, senha, origem e porta (sensível, fora do git)
+├── instalar-inicio-automatico.ps1 # Tarefa "LARA Servidor"
+├── recursivo.py                   # Identificação recursiva (Python)
+├── instalar-recursivo.ps1         # Tarefa "LARA Recursivo"
+├── exportar_modelo.m              # Exporta o modelo em batelada (MATLAB) para modelo.json
+└── dados/                         # Pasta de trabalho
+    ├── estado.json, servidor.log
+    └── modelo.json, parametros.json, estado_recursivo.json,
+        historico_parametros.csv, recursivo.log
 ```

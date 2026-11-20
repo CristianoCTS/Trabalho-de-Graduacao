@@ -22,13 +22,15 @@ for i = 1:numESPs
         fprintf('Falha ao ler canal %d\n', espChIds(i));
     end
 end
-ctrl = thingSpeakRead(espChIds(3), 'Fields', 1:3,'NumPoints', 1, 'ReadKey', espReadKeys{3});
+ctrl = thingSpeakRead(espChIds(3), 'Fields', 1:5, 'NumPoints', 1, 'ReadKey', espReadKeys{3});
 ControlType = ctrl(1);
 SetPoint = ctrl(2);
 GastoEnergetico = ctrl(3);
+pacote = ctrl(5);
 MsgESPs = dados(:,5);
 OcpESPS = dados(:,4);
 Ocupacao = GetOcupation(OcpESPS(1), OcpESPS(2), MsgESPs(1), MsgESPs(2));
+%Ocupacao = 0;
 Alerta = Alertas(MsgESPs(1), MsgESPs(2));
 comand = BrokerControl(ControlType, SetPoint, Ocupacao)
 codigo = comand
@@ -43,11 +45,7 @@ TimeS = minute(t) * 60 + floor(second(t));
 %==========================Obtenção das variaveis==========================%
 
 %============================Tomada de decisões============================%
-if Ocupacao > 0
-    parametros = '020026023030020026100015030300027025020120100030020003004000';
-else
-    parametros = '020026023030020026100015030300027025020120100030020003004000';
-end
+parametros = MontaParametros(pacote, Ocupacao);
 
 if houveTroca
     energia(:) = FLAG;
@@ -67,7 +65,7 @@ end
 %===============================Funcoes====================================%
 
 function comando = BrokerControl(ControlType, SetPoint, Ocupacao)
-    if (((ControlType == 3) || (ControlType == 5)) && Ocupacao <= 0)
+    if ((ControlType == 5) && Ocupacao <= 0)
         msg1 = 9;
         msg2 = 9;
         ESPactive = 0;
@@ -180,4 +178,15 @@ function alrt = Alertas(a, b)
         alrt2 = 0;
     end
     alrt = (alrt1 * 10) + alrt2;
+end
+
+function p = MontaParametros(pacote, Ocupacao)
+    ocup  = '020026023030020026140014030300024066018120100030020003004000';
+    vazia = '020026023100020026048014030300024066018120100100067003004000';
+    if Ocupacao > 0, p = ocup; else, p = vazia; end
+    if isnan(pacote) || pacote < 0 || pacote >= 1e12, return, end
+    s = sprintf('%012.0f', pacote);
+    if Ocupacao > 0, p(19:21) = s(1:3); else, p(19:21) = s(4:6); end
+    p(22:24) = s(7:9);
+    p(34:36) = s(10:12);
 end

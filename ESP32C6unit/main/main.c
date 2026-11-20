@@ -104,7 +104,6 @@ void app_main(void) {
                     data[4] = 0.0f;
                 }
             }
-            }
             //Obtencao da Ocupação----------------------------------------------------------
             //Obtencao da Instrução---------------------------------------------------------
             if (intercom_read(instrucao)) {
@@ -172,6 +171,7 @@ void app_main(void) {
                     IRerror += 1;
                 }
             }
+        }
 
         //Obtencao de dados------------------------------------------------
         if ((Time - LastDataMngt) >= data_interval) { // 8 segundos
