@@ -56,9 +56,9 @@ if ctValido && ~isnan(GastoEnergetico)
 end
 
 if NovoGasto || houveTroca
-    thingSpeakWrite(writeChId, {codigo, parametros, energia(1), energia(2), energia(3), Ocupacao, TimeS, Alerta}, 'Fields', 1:8, 'WriteKey', writeKey);
+    Escreve(writeChId, {codigo, parametros, energia(1), energia(2), energia(3), Ocupacao, TimeS, Alerta}, 1:8, writeKey);
 else
-     thingSpeakWrite(writeChId, {codigo, parametros, Ocupacao, TimeS, Alerta}, 'Fields', [1 2 6 7 8], 'WriteKey', writeKey);
+    Escreve(writeChId, {codigo, parametros, Ocupacao, TimeS, Alerta}, [1 2 6 7 8], writeKey);
 end
 %============================Tomada de decisões============================%
 
@@ -189,4 +189,15 @@ function p = MontaParametros(pacote, Ocupacao)
     if Ocupacao > 0, p(19:21) = s(1:3); else, p(19:21) = s(4:6); end
     p(22:24) = s(7:9);
     p(34:36) = s(10:12);
+end
+
+function Escreve(chId, valores, campos, chave)
+    for k = 1:2
+        try
+            thingSpeakWrite(chId, valores, 'Fields', campos, 'WriteKey', chave);
+            return
+        catch
+            pause(16);
+        end
+    end
 end
